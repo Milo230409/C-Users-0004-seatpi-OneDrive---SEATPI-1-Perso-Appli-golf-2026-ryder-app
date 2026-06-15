@@ -1,0 +1,2449 @@
+import React, { useState, useEffect, useMemo, createContext, useContext } from "react";
+import { supabase, supabaseEnabled } from "./supabaseClient";
+import { loadGroup, upsertEntity, deleteEntity, loadMyProfile, saveMyProfile, subscribeGroup } from "./supabaseSync";
+
+/* ============================================================
+   GOLF CLUB APP v3 — Parties du WE + Événements
+   - Parcours avec PLUSIEURS DÉPARTS (tees) : couleur, CR/SSS, Slope, Par.
+     Normes par pays (FR/US/UK/ES/perso).
+   - Chaque joueur choisit SON départ → CHP calculé sur ce départ.
+   - Événement : joueurs non affectés au départ. Équipes "Équipe 1 / Équipe 2"
+     par défaut, renommables.
+   ============================================================ */
+
+const APP_VERSION="v2.7 · profils"; // ← change à chaque mise en prod pour vérifier
+const T={
+  bg:"#0a0f0c",        // fond quasi noir légèrement verdâtre
+  panel:"#121a15",     // carte
+  panel2:"#1a2620",    // carte surélevée / option active discrète
+  line:"#2a3a30",      // bordures
+  eu:"#1f6feb",        // bleu équipe
+  us:"#ec3750",        // rouge équipe / accent "difficile"
+  gold:"#f5c542",      // doré accent
+  violet:"#7c5cff",    // accent secondaire (aléatoire)
+  text:"#eef5ef",
+  dim:"#7e9486",
+  accent:"#86e01e",    // VERT FAIRWAY électrique = couleur d'action dominante
+  accentDark:"#5fa810",
+  ink:"#08110a",       // texte sur boutons verts
+};
+
+function todayTag(){const d=new Date(),p=n=>String(n).padStart(2,"0");
+  return `${p(d.getDate())}${p(d.getMonth()+1)}${d.getFullYear()}`;}
+function timeTag(){const d=new Date(),p=n=>String(n).padStart(2,"0");
+  return `${p(d.getHours())}h${p(d.getMinutes())}`;}
+
+const TEE_PRESETS={
+  France:["Blanc","Jaune","Bleu","Rouge","Orange"],
+  Espagne:["Noir","Blanc","Jaune","Bleu","Rouge"],
+  USA:["Black","Blue","White","Gold","Red"],
+  UK:["Black","White","Yellow","Blue","Red"],
+  Perso:["Départ 1","Départ 2","Départ 3"],
+};
+const TEE_COLOR={Blanc:"#f4f4f4",Jaune:"#e7c14b",Bleu:"#3a7bd5",Rouge:"#d63a3a",
+  Orange:"#e08a2b",Noir:"#222",Or:"#caa12e",
+  Black:"#222",Blue:"#3a7bd5",White:"#f4f4f4",Gold:"#caa12e",
+  Red:"#d63a3a",Yellow:"#e7c14b"};
+const teeDot=t=>TEE_COLOR[t]||T.dim;
+// nom affiché : surnom si renseigné, sinon prénom
+const dispName=p=>p?.nick?.trim()||p?.name||"?";
+
+function courseHandicap(index,slope,cr,par){
+  if(index==null) return 0;
+  return Math.round(index*((slope||113)/113)+((cr??par??72)-(par??72)));
+}
+function strokesPerHole(chp,si){
+  const holes=(si&&si.length===18)?si:Array.from({length:18},(_,i)=>i+1);
+  const res=new Array(18).fill(0);const n=Math.abs(chp),sign=chp<0?-1:1;
+  for(let s=0;s<n;s++){const t=(s%18)+1;const idx=holes.indexOf(t);if(idx>=0)res[idx]+=sign;}
+  return res;
+}
+function teeData(course,teeName){
+  if(!course?.tees?.length) return {cr:72,slope:130,par:72};
+  return course.tees.find(t=>t.name===teeName)||course.tees[0];
+}
+// par de chaque trou : utilise course.pars si présent, sinon répartit le par global
+function holePars(course){
+  if(course?.pars?.length===18) return course.pars;
+  const par=course?.par||72;
+  // répartition classique : surtout des 4, quelques 3 et 5 pour tomber sur le par total
+  const base=new Array(18).fill(4);
+  let diff=par-72; // ajuste autour de 72
+  // 4 trous en par 3 et 4 en par 5 par défaut → reste à 72
+  [3,6,8,12].forEach(i=>base[i]=3);
+  [4,10,14,17].forEach(i=>base[i]=5);
+  // corrige pour matcher le par réel
+  let i=0;while(diff>0&&i<18){if(base[i]<5){base[i]++;diff--;}i++;}
+  i=0;while(diff<0&&i<18){if(base[i]>3){base[i]--;diff++;}i++;}
+  return base;
+}
+// renvoie la liste des n° de trous où le joueur reçoit ses coups (selon CHP + SI)
+function strokeHoles(chp,si){
+  const arr=strokesPerHole(chp,si);
+  const out=[];
+  arr.forEach((v,i)=>{ if(v>0) out.push({hole:i+1,n:v}); });
+  return out;
+}
+// nombre de birdies nets : trous où le score net < par du trou (pour départage à égalité)
+function countNetBirdies(netHoles,course){
+  const pars=holePars(course);
+  let b=0;
+  netHoles.forEach((s,i)=>{ if(s!=null && s<pars[i]) b++; });
+  return b;
+}
+
+/* ===== API GolfCourseAPI : recherche + détails (repli manuel si CORS) ===== */
+const GolfAPI={
+  key(){ return DB.lget("apiKey",""); },
+  async search(q){
+    const k=this.key();
+    if(!k) throw {kind:"nokey"};
+    const r=await fetch(`https://api.golfcourseapi.com/v1/search?search_query=${encodeURIComponent(q)}`,
+      {headers:{Authorization:"Key "+k}});
+    if(!r.ok) throw {kind:"http",status:r.status};
+    const d=await r.json();
+    return (d.courses||[]).slice(0,8);
+  },
+  // diagnostic : renvoie un texte clair sur ce qui se passe réellement
+  async test(){
+    const k=this.key();
+    if(!k) return "❌ Aucune clé enregistrée. Colle ta clé ci-dessus et enregistre-la.";
+    try{
+      const r=await fetch("https://api.golfcourseapi.com/v1/search?search_query=pals",
+        {headers:{Authorization:"Key "+k}});
+      if(r.status===401||r.status===403)
+        return `❌ Clé refusée (${r.status}). Vérifie que la clé est correcte et active sur golfcourseapi.com.`;
+      if(!r.ok) return `⚠️ Réponse HTTP ${r.status}. L'API a répondu mais avec une erreur.`;
+      const d=await r.json();
+      const n=(d.courses||[]).length;
+      return `✅ Connexion OK ! La clé fonctionne (${n} parcours trouvés pour "pals"). L'autocomplétion devrait marcher.`;
+    }catch(e){
+      // une erreur réseau/TypeError ici = quasi toujours un blocage CORS du navigateur
+      return "🚫 Appel bloqué par le navigateur (CORS). Ta clé n'est pas en cause : c'est une "+
+        "protection du navigateur contre les appels directs vers cette API. Solution : passer "+
+        "par un relais (Supabase). En attendant, saisis les parcours manuellement.";
+    }
+  },
+  // transforme un résultat API en parcours interne avec ses départs + détail trou par trou
+  toCourse(c){
+    const tees=[];
+    let pars=null, si=null;
+    const grab=(arr)=>{(arr||[]).forEach(t=>{
+      const holes=t.holes||[];
+      const tSi=holes.map(h=>h.handicap).filter(x=>x!=null);
+      const tPar=holes.map(h=>h.par).filter(x=>x!=null);
+      // longueur totale du départ : champ direct ou somme des trous
+      const len=t.total_yards||t.total_meters||
+        (holes.reduce((s,h)=>s+(h.yardage||h.length||0),0)||null);
+      if(!si && tSi.length===18) si=tSi;
+      if(!pars && tPar.length===18) pars=tPar;
+      tees.push({name:t.tee_name||"Départ", cr:t.course_rating, slope:t.slope_rating,
+        par:t.par_total, length:len||undefined, si:tSi.length===18?tSi:undefined});});};
+    grab(c.tees?.male); grab(c.tees?.female);
+    if(!si) si=Array.from({length:18},(_,i)=>i+1);
+    const course={id:Date.now(), apiId:c.id, source:"api", updated:Date.now(),
+      name:`${c.club_name} — ${c.course_name}`,
+      country:"—", par:tees[0]?.par||(pars?pars.reduce((a,b)=>a+b,0):72), si,
+      tees:tees.length?tees:[{name:"Standard",cr:72,slope:130,par:72}]};
+    if(pars) course.pars=pars; // par réel de chaque trou
+    return course;
+  },
+  // recharge les données d'un parcours depuis l'API via son apiId (pour l'actualisation)
+  async refresh(apiId){
+    const k=this.key();
+    if(!k||!apiId) throw {kind:"noref"};
+    const r=await fetch(`https://api.golfcourseapi.com/v1/courses/${apiId}`,
+      {headers:{Authorization:"Key "+k}});
+    if(!r.ok) throw {kind:"http",status:r.status};
+    const d=await r.json();
+    return this.toCourse(d.course||d);
+  }
+};
+
+function formulasFor(n){
+  if(n===2) return ["matchplay","strokeplay_net","stableford_net","stableford_gross","skins"];
+  if(n===3) return ["chouette","onevonevone","stableford_net","stableford_gross","skins"];
+  if(n===4) return ["fourball","foursome","mexicaine","scramble","stableford_net","stableford_gross","matchplay2v2"];
+  return ["stableford_net"];
+}
+const FORMULA_LABELS={matchplay:"Match Play 1v1",strokeplay_net:"Stroke Play (net) 1v1",
+  stableford:"Stableford",stableford_net:"Stableford Net",stableford_gross:"Stableford Brut",
+  skins:"Skins (18 pts · report)",chouette:"Chouette (6 pts · 4/2/0)",
+  onevonevone:"1v1v1 (match play à 3)",fourball:"Fourball / Meilleure balle 2v2",
+  foursome:"Foursome / Greensome 2v2",mexicaine:"Mexicaine 2v2",
+  scramble:"Scramble 2v2",matchplay2v2:"Match Play 2v2"};
+
+function autoSplit(n){
+  const map={2:[[2,"matchplay"]],3:[[3,"chouette"]],4:[[4,"fourball"]],
+    5:[[2,"matchplay"],[3,"chouette"]],6:[[2,"matchplay"],[4,"fourball"]],
+    7:[[4,"fourball"],[3,"chouette"]],8:[[4,"fourball"],[4,"fourball"]],
+    9:[[3,"chouette"],[3,"chouette"],[3,"chouette"]]};
+  if(map[n]) return map[n].map(([size,formula])=>({size,formula}));
+  const g=[];let r=n;while(r>=4){g.push({size:4,formula:"fourball"});r-=4;}
+  if(r===3)g.push({size:3,formula:"chouette"});else if(r===2)g.push({size:2,formula:"matchplay"});
+  else if(r===1&&g.length)g[g.length-1].size+=1;return g;
+}
+
+const Ctx=createContext();
+// Stockage persistant : écrit dans localStorage (survit aux rechargements et aux
+// nouvelles livraisons sur le même domaine). Repli en mémoire si localStorage est
+// indisponible (navigation privée, SSR…).
+const DB={_mem:{},
+  lget(k,d){
+    try{const v=localStorage.getItem("dgda_"+k);return v!=null?JSON.parse(v):d;}
+    catch(e){return this._mem[k]!==undefined?this._mem[k]:d;}
+  },
+  lset(k,v){
+    this._mem[k]=v;
+    try{localStorage.setItem("dgda_"+k,JSON.stringify(v));}catch(e){/* quota/privé */}
+  }};
+
+export default function App(){
+  const [user,setUser]=useState(()=>DB.lget("user",null));
+  // Plus d'authentification : accès libre. Données partagées via Supabase (clé publique).
+  const [members,setMembers]=useState(()=>DB.lget("members",[]));
+  const [games,setGames]=useState(()=>DB.lget("games",[]));
+  const [courses,setCourses]=useState(()=>DB.lget("courses",SEED_COURSES));
+  const [tab,setTab]=useState("home");
+  const [staleCount,setStaleCount]=useState(0);
+  const [syncing,setSyncing]=useState(false);
+  const [loaded,setLoaded]=useState(false);
+  const cloud = supabaseEnabled; // partagé dès que les clés sont là (pas besoin de session)
+
+  // ---- Chargement initial du groupe depuis Supabase (accès libre) ----
+  useEffect(()=>{
+    if(!cloud){ setLoaded(true); return; }
+    let alive=true;
+    (async()=>{
+      setSyncing(true);
+      const grp=await loadGroup();
+      if(alive&&grp){
+        setGames(grp.games||[]);
+        if(grp.players?.length) setMembers(grp.players);
+        if(grp.courses?.length) setCourses(grp.courses);
+        // si la base n'a pas encore de parcours, on pousse le seed une 1re fois
+        if(grp.courses?.length===0){
+          for(const c of SEED_COURSES){ await upsertEntity("courses",c,null); }
+          setCourses(SEED_COURSES);
+        }
+      }
+      setSyncing(false); setLoaded(true);
+    })();
+    const unsub=subscribeGroup(async()=>{
+      const grp=await loadGroup();
+      if(alive&&grp){
+        setGames(grp.games||[]); setMembers(grp.players||[]); setCourses(grp.courses||[]);
+      }
+    });
+    return ()=>{alive=false;unsub&&unsub();};
+  },[]);
+
+  // ---- Persistance locale (toujours, pour le mode hors-ligne / invité) ----
+  useEffect(()=>{ DB.lset("user",user); },[user]);
+  useEffect(()=>{ if(!cloud) DB.lset("members",members); },[members,cloud]);
+  useEffect(()=>{ if(!cloud) DB.lset("games",games); },[games,cloud]);
+  useEffect(()=>{ if(!cloud) DB.lset("courses",courses); },[courses,cloud]);
+
+  // wrappers qui sauvegardent dans le cloud (clé publique, pas d'userId)
+  const saveGames=async(next)=>{ setGames(next);
+    if(cloud){ for(const g of next){ await upsertEntity("games",g,null); } } };
+  const saveMembers=async(next)=>{ setMembers(next);
+    if(cloud){ for(const m of next){ await upsertEntity("players",m,null); } } };
+  const saveCourses=async(next)=>{ setCourses(next);
+    if(cloud){ for(const c of next){ await upsertEntity("courses",c,null); } } };
+
+  const logout=()=>{ setUser(null); }; // "changer de joueur"
+  useEffect(()=>{const SIX=183*24*3600*1000;const now=Date.now();
+    const stale=courses.filter(c=>c.source==="api"&&c.apiId&&(now-(c.updated||0))>SIX);
+    setStaleCount(stale.length);},[courses,user]);
+  if(!user) return <WhoAreYou members={members} loaded={loaded} cloud={cloud}
+    onPick={setUser}/>;
+  const LOGIN_ENABLED=true;
+  // rafraîchit tous les parcours API périmés (sur action de l'utilisateur)
+  const refreshStale=async()=>{
+    const SIX=183*24*3600*1000;const now=Date.now();
+    const stale=courses.filter(c=>c.source==="api"&&c.apiId&&(now-(c.updated||0))>SIX);
+    let updated=[...courses],ok=0;
+    for(const c of stale){
+      try{const fresh=await GolfAPI.refresh(c.apiId);
+        updated=updated.map(x=>x.id===c.id?{...fresh,id:c.id}:x);ok++;}
+      catch(e){/* CORS/erreur : on garde l'ancien */}
+    }
+    setCourses(updated);setStaleCount(0);
+    alert(ok>0?`${ok} parcours mis à jour.`:
+      "Mise à jour impossible (API bloquée/CORS). Tes parcours restent utilisables.");
+  };
+  const tabs=[["home","Accueil","🏠"],["new","Nouvelle","➕"],
+    ["players","Joueurs","👤"],["champ","Classement","🏅"],["history","Historique","📜"]];
+  return (
+    <Ctx.Provider value={{user,setUser,members,setMembers:saveMembers,
+      games,setGames:saveGames,courses,setCourses:saveCourses,
+      cloud,syncing}}>
+    <div style={shell}>
+      <style>{GLOBAL_CSS}</style>
+      <Header user={user} onLogout={LOGIN_ENABLED?logout:null} setTab={setTab}/>
+      <div style={{padding:"14px 14px 0"}}>
+        {tab==="home"&&<Home setTab={setTab} staleCount={staleCount} refreshStale={refreshStale}/>}
+        {tab==="new"&&<NewGame setTab={setTab}/>}
+        {tab==="players"&&<PlayersTab/>}
+        {tab==="champ"&&<Championship/>}
+        {tab==="courses"&&<CoursesTab/>}
+        {tab==="settings"&&<SettingsTab/>}
+        {tab==="history"&&<History/>}
+      </div>
+      <TabBar tabs={tabs} tab={tab} setTab={setTab}/>
+    </div>
+    </Ctx.Provider>
+  );
+}
+
+function WhoAreYou({members,loaded,cloud,onPick}){
+  const [adding,setAdding]=useState(false);
+  const [profileFor,setProfileFor]=useState(null); // joueur dont on complète la fiche
+  const [nm,setNm]=useState("");
+  const list=[...members].sort((a,b)=>dispName(a).localeCompare(dispName(b)));
+
+  const enterAs=(p)=>onPick({id:p.id,name:p.name,nick:p.nick,email:p.email,
+    mobile:p.mobile,index:p.index,player:true});
+  // choisir un joueur : si profil pas complété → formulaire obligatoire
+  const choose=(p)=>{ if(p.profileDone) enterAs(p); else setProfileFor(p); };
+  const guest=()=>onPick({name:"Invité",guest:true});
+
+  if(profileFor) return <ProfileForm player={profileFor} cloud={cloud}
+    onDone={(updated)=>{ enterAs(updated); }}
+    onCancel={()=>setProfileFor(null)}/>;
+
+  return (
+    <div style={shell}><style>{GLOBAL_CSS}</style>
+    <div style={{padding:"44px 24px 40px",textAlign:"center"}}>
+      <CrestLogo size={120}/>
+      <div style={{fontFamily:"'Archivo',sans-serif",fontWeight:900,fontSize:28,lineHeight:1,
+        letterSpacing:-1,marginTop:16}}>Du Golf <span style={{color:T.accent}}>&</span> des Amis</div>
+      <div style={{color:T.accent,marginTop:8,fontSize:13,fontWeight:700}}>Joue, partage, kiffe</div>
+      <div style={{marginTop:8,display:"inline-block",background:T.accent,
+        color:"#06210f",fontWeight:800,fontSize:12,fontFamily:"monospace",
+        padding:"3px 10px",borderRadius:999}}>
+        {APP_VERSION}{cloud?" · ☁️ cloud":" · 📱 local"}</div>
+
+      <div style={{marginTop:26,fontFamily:"'Archivo',sans-serif",fontWeight:800,
+        fontSize:18,textAlign:"left"}}>Qui es-tu ?</div>
+      <div style={{fontSize:12,color:T.dim,textAlign:"left",marginTop:2,marginBottom:14}}>
+        Choisis ton nom pour entrer.</div>
+
+      {!loaded && <div style={{color:T.dim,fontSize:13,padding:"20px 0"}}>Chargement…</div>}
+
+      {loaded && list.length===0 && <div style={{color:T.dim,fontSize:13,
+        padding:"16px",background:T.panel,borderRadius:12,textAlign:"left",lineHeight:1.5}}>
+        Aucun joueur enregistré pour l'instant. Ajoute-toi ci-dessous.</div>}
+
+      <div style={{display:"flex",flexDirection:"column",gap:8,marginTop:4}}>
+        {loaded && list.map(p=>(
+          <button key={p.id} onClick={()=>choose(p)} style={{display:"flex",alignItems:"center",
+            gap:12,padding:"14px 16px",borderRadius:14,border:`1.5px solid ${T.line}`,
+            background:T.panel,cursor:"pointer",textAlign:"left"}}>
+            <span style={{width:38,height:38,borderRadius:"50%",background:T.accent,
+              color:T.ink,display:"flex",alignItems:"center",justifyContent:"center",
+              fontWeight:800,fontSize:16,flexShrink:0}}>
+              {(dispName(p)[0]||"?").toUpperCase()}</span>
+            <div style={{minWidth:0,flex:1}}>
+              <div style={{fontWeight:800,fontSize:15}}>{dispName(p)}</div>
+              {p.name&&p.nick&&<div style={{fontSize:11,color:T.dim}}>{p.name}</div>}
+            </div>
+            {!p.profileDone&&<span style={{fontSize:10,color:T.gold,
+              border:`1px solid ${T.gold}55`,borderRadius:999,padding:"2px 8px"}}>
+              profil à compléter</span>}
+          </button>))}
+      </div>
+
+      {loaded && !adding && <button onClick={()=>setAdding(true)}
+        style={{...delBtn,width:"100%",marginTop:12,padding:"12px",fontSize:13,
+          borderColor:T.accent,color:T.accent}}>+ Je ne suis pas dans la liste</button>}
+
+      {adding && <div style={{...card(T.accent),marginTop:12,textAlign:"left"}}>
+        <div style={{fontWeight:800,marginBottom:8}}>Ton prénom pour commencer</div>
+        <input value={nm} onChange={e=>setNm(e.target.value)} placeholder="Prénom" style={inp}/>
+        <button disabled={!nm.trim()} onClick={()=>{
+            const p={id:"p"+Date.now(),name:nm.trim(),nick:"",index:0,profileDone:false};
+            setAdding(false);setProfileFor(p); // enchaîne sur le profil obligatoire
+          }} style={{...addBtn,opacity:nm.trim()?1:.5}}>Continuer</button>
+      </div>}
+    </div></div>
+  );
+}
+
+// Formulaire profil OBLIGATOIRE à la première connexion
+function ProfileForm({player,cloud,onDone,onCancel}){
+  const [name,setName]=useState(player.name||"");
+  const [nick,setNick]=useState(player.nick||"");
+  const [mobile,setMobile]=useState(player.mobile||"");
+  const [email,setEmail]=useState(player.email||"");
+  const [index,setIndex]=useState(player.index!=null?String(player.index):"");
+  const [comm,setComm]=useState(player.comm||"whatsapp"); // whatsapp|email|both|none
+  const [err,setErr]=useState("");
+  const save=()=>{
+    if(!name.trim()) return setErr("Indique ton prénom.");
+    if(index==="") return setErr("Indique ton index de jeu.");
+    const updated={...player,name:name.trim(),nick:nick.trim(),
+      mobile:mobile.trim(),email:email.trim(),index:parseFloat(index)||0,
+      comm,profileDone:true};
+    if(cloud) upsertEntity("players",updated,null);
+    onDone(updated);
+  };
+  return (
+    <div style={shell}><style>{GLOBAL_CSS}</style>
+    <div style={{padding:"40px 24px"}}>
+      <CrestLogo size={80}/>
+      <div style={{fontFamily:"'Archivo',sans-serif",fontWeight:900,fontSize:22,
+        marginTop:12}}>Complète ton profil</div>
+      <div style={{fontSize:12,color:T.dim,marginTop:4,marginBottom:18,lineHeight:1.5}}>
+        Une seule fois, pour que tes parties et ton classement soient à ton nom.</div>
+
+      <Field label="Prénom *"><input value={name} onChange={e=>setName(e.target.value)}
+        placeholder="Prénom" style={inp}/></Field>
+      <Field label="Surnom (affiché dans les parties)"><input value={nick}
+        onChange={e=>setNick(e.target.value)} placeholder="ex: Trichatard" style={inp}/></Field>
+      <Field label="Index de jeu *"><input type="number" step="0.1" value={index}
+        onChange={e=>setIndex(e.target.value)} placeholder="ex: 18.4" style={inp}/></Field>
+      <Field label="Mobile"><input type="tel" value={mobile}
+        onChange={e=>setMobile(e.target.value)} placeholder="06 12 34 56 78" style={inp}/></Field>
+      <Field label="Email"><input type="email" value={email}
+        onChange={e=>setEmail(e.target.value)} placeholder="email" style={inp}/></Field>
+
+      <div style={{marginTop:6}}>
+        <PrefRow label="Notifications" value={comm} setValue={setComm}
+          opts={[["whatsapp","WhatsApp"],["email","Email"],["both","Les 2"],["none","Aucune"]]}/>
+      </div>
+
+      {err&&<div style={{color:T.gold,fontSize:12,marginTop:8}}>{err}</div>}
+      <button onClick={save} style={{...addBtn}}>Valider et entrer</button>
+      <button onClick={onCancel} style={{...delBtn,width:"100%",marginTop:8,padding:"11px"}}>
+        ← Retour</button>
+    </div></div>
+  );
+}
+// ligne de préférence en pilules
+function PrefRow({label,value,setValue,opts}){
+  return (
+    <div style={{marginBottom:10}}>
+      <div style={{fontSize:10,color:T.dim,textTransform:"uppercase",letterSpacing:.5,
+        fontWeight:700,marginBottom:5}}>{label}</div>
+      <div style={{display:"flex",gap:6}}>
+        {opts.map(([v,l])=>(
+          <button key={v} onClick={()=>setValue(v)} style={{flex:1,padding:"9px 6px",
+            borderRadius:12,border:value===v?"none":`1.5px solid ${T.line}`,
+            background:value===v?T.accent:"transparent",color:value===v?T.ink:T.text,
+            fontWeight:800,fontSize:12,cursor:"pointer"}}>{l}</button>))}
+      </div>
+    </div>
+  );
+}
+
+function Header({user,onLogout,setTab}){
+  return (
+    <div style={{padding:"22px 18px 14px",position:"relative",overflow:"hidden",
+      borderBottom:`1px solid ${T.line}`,
+      background:`radial-gradient(120% 100% at 0% 0%, ${T.accent}14 0%, transparent 55%), ${T.bg}`,
+      display:"flex",justifyContent:"space-between",alignItems:"flex-end"}}>
+      <div style={{display:"flex",alignItems:"center",gap:11}}>
+        <CrestLogo size={44}/>
+        <div>
+          <div style={{fontFamily:"'Archivo',sans-serif",fontWeight:900,fontSize:18,
+            lineHeight:.95,letterSpacing:-.5}}>
+            Du Golf <span style={{color:T.accent}}>&</span> des Amis</div>
+          <div style={{fontSize:11,color:T.dim,marginTop:3,fontWeight:600,letterSpacing:.3}}>
+            {onLogout?`Salut ${user.nick?.trim()||user.name} 👋`:"Joue, partage, kiffe"}</div></div></div>
+      <div style={{display:"flex",gap:8,alignItems:"center"}}>
+        {setTab&&<button onClick={()=>setTab("settings")} style={{...delBtn,fontSize:14,
+          padding:"7px 10px"}}>⚙️</button>}
+        {onLogout && <button onClick={onLogout} style={{...delBtn,fontSize:11}}>Déconnexion</button>}
+      </div>
+    </div>
+  );
+}
+function TabBar({tabs,tab,setTab}){
+  return (<div style={tabbar}>{tabs.map(([k,l,i])=>(
+    <button key={k} onClick={()=>setTab(k)} style={{...tabBtn,color:tab===k?T.accent:T.dim}}>
+      <span style={{fontSize:20}}>{i}</span><span style={{fontSize:10,fontWeight:700}}>{l}</span>
+    </button>))}</div>);
+}
+
+function Home({setTab,staleCount,refreshStale}){
+  const {games,user}=useContext(Ctx);
+  const ongoing=games.filter(g=>!g.done);
+  const done=games.filter(g=>g.done);
+  const prenom=(user?.nick?.trim()||user?.name||"").split(" ")[0]||"toi";
+  const waLink=DB.lget("waGroup","");
+  return (
+    <div>
+      <div style={{margin:"6px 0 18px"}}>
+        <div style={{fontFamily:"'Archivo',sans-serif",fontWeight:900,fontSize:25,
+          lineHeight:1.05,letterSpacing:-.5}}>
+          Prêt à jouer, <span style={{color:T.accent}}>{prenom}</span> ?</div>
+        <div style={{color:T.dim,fontSize:13,marginTop:6}}>
+          Lance une partie, suis le score en direct, partage les résultats.</div>
+      </div>
+
+      {staleCount>0&&<div onClick={refreshStale} style={{...card(T.gold),cursor:"pointer",
+        display:"flex",alignItems:"center",gap:12,
+        background:`linear-gradient(160deg, ${T.gold}22 0%, ${T.panel} 60%)`}}>
+        <span style={{fontSize:26}}>🔄</span>
+        <div><div style={{fontWeight:800}}>{staleCount} parcours à actualiser</div>
+          <div style={{fontSize:11,color:T.dim}}>Données de plus de 6 mois — tape pour mettre à jour</div></div></div>}
+
+      {/* Deux cartes d'action principales, compactes */}
+      <div style={{display:"flex",gap:12}}>
+        <ActionCard color={T.accent} icon="⛳" title="Partie amicale"
+          sub="2 à 4 joueurs · entre potes"
+          onClick={()=>{DB.lset("newType","simple");setTab("new");}}/>
+        <ActionCard color={T.gold} icon="🏆" title="Tournoi / Ryder"
+          sub="5+ joueurs · équipes & manches"
+          onClick={()=>{DB.lset("newType","event");setTab("new");}}/>
+      </div>
+
+      {/* Gros bouton WhatsApp visible */}
+      <button onClick={()=>waLink?window.open(waLink,"_blank"):setTab("settings")}
+        style={{width:"100%",marginTop:12,padding:"14px",borderRadius:16,border:"none",
+          cursor:"pointer",background:"#25D366",color:"#06210f",fontWeight:800,fontSize:15,
+          display:"flex",alignItems:"center",justifyContent:"center",gap:10,
+          boxShadow:"0 6px 22px #25D36633"}}>
+        <span style={{fontSize:20}}>💬</span>
+        {waLink?"Ouvrir le groupe WhatsApp":"Configurer le groupe WhatsApp"}</button>
+
+      {ongoing.length>0&&<><Section>En cours</Section>
+        {ongoing.map(g=><div key={g.id} onClick={()=>setTab("history")}
+          style={{...card(T.gold),cursor:"pointer",
+          background:`linear-gradient(160deg, ${T.gold}1a 0%, ${T.panel} 60%)`}}>
+          <div style={{fontWeight:800}}>▶ {g.name}</div>
+          <div style={{fontSize:11,color:T.dim}}>
+            {g.subtype==="ryder"?"Ryder Cup":g.type==="event"?"Tournoi":"Partie amicale"} ·
+            {g.rounds?` ${g.rounds.length} manche(s)`:` ${g.subgames?.length||1} match(s)`} · en cours</div></div>)}</>}
+
+      <Section>Raccourcis</Section>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+        <Tile color={T.accent} icon="🏌️" title="Mes parties"
+          sub={`${ongoing.length} en cours · ${done.length} terminées`}
+          onClick={()=>setTab("history")}/>
+        <Tile color={T.gold} icon="🏅" title="Classement"
+          sub="Championnat & confrontations" onClick={()=>setTab("champ")}/>
+        <Tile color="#25D366" icon="💬" title="Chat du groupe"
+          sub={waLink?"Ouvrir WhatsApp":"À configurer (Réglages)"}
+          onClick={()=>waLink?window.open(waLink,"_blank"):setTab("settings")}/>
+        <Tile color={T.eu} icon="⛳" title="Parcours"
+          sub="Gérer / importer" onClick={()=>setTab("courses")}/>
+      </div>
+
+      <div style={{display:"flex",flexDirection:"column",alignItems:"center",
+        margin:"30px 0 10px",opacity:.9}}>
+        <CrestLogo size={92}/>
+        <div style={{fontFamily:"'Archivo',sans-serif",fontWeight:800,fontSize:14,
+          marginTop:10,letterSpacing:.3,color:T.dim}}>
+          Du Golf <span style={{color:T.accent}}>&</span> des Amis</div>
+        <div style={{marginTop:8,display:"inline-block",background:T.accent,
+          color:"#06210f",fontWeight:800,fontSize:12,fontFamily:"monospace",
+          padding:"3px 10px",borderRadius:999}}>
+          {APP_VERSION}{supabaseEnabled?" · ☁️ cloud":" · 📱 local"}</div>
+      </div>
+    </div>
+  );
+}
+// carte d'action principale, compacte (icône + texte côte à côte)
+function ActionCard({color,icon,title,sub,onClick}){
+  return (<div onClick={onClick} style={{flex:1,borderRadius:20,padding:"18px 16px",
+    cursor:"pointer",border:`1.5px solid ${color}55`,
+    background:`linear-gradient(160deg, ${color}26 0%, ${T.panel} 70%)`,
+    boxShadow:`0 6px 22px ${color}14`,transition:"transform .12s"}}
+    onMouseDown={e=>e.currentTarget.style.transform="scale(.97)"}
+    onMouseUp={e=>e.currentTarget.style.transform="scale(1)"}
+    onMouseLeave={e=>e.currentTarget.style.transform="scale(1)"}>
+    <div style={{fontSize:40,lineHeight:1}}>{icon}</div>
+    <div style={{fontFamily:"'Archivo',sans-serif",fontWeight:800,fontSize:18,
+      marginTop:12,letterSpacing:-.3,lineHeight:1.1}}>{title}</div>
+    <div style={{fontSize:11,color:T.dim,marginTop:5,lineHeight:1.4}}>{sub}</div></div>);
+}
+// logo écusson G&A (inline SVG, & en vert fairway)
+function CrestLogo({size=92}){
+  return (
+    <svg width={size} height={size} viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+      <path d="M256 64 L420 116 V268 C420 360 348 418 256 452 C164 418 92 360 92 268 V116 Z"
+        fill="#101a14" stroke={T.accent} strokeWidth="12"/>
+      <path d="M256 96 L392 139 V262 C392 338 332 387 256 416 C180 387 120 338 120 262 V139 Z"
+        fill="none" stroke={T.accent} strokeWidth="2.5" opacity="0.4"/>
+      <text x="256" y="250" fontFamily="Georgia, 'Times New Roman', serif" fontWeight="700"
+        fontSize="150" fill={T.text} textAnchor="middle">G</text>
+      <text x="256" y="332" fontFamily="Georgia, serif" fontStyle="italic" fontWeight="700"
+        fontSize="120" fill={T.accent} textAnchor="middle">&amp;</text>
+      <text x="256" y="414" fontFamily="Georgia, 'Times New Roman', serif" fontWeight="700"
+        fontSize="110" fill={T.text} textAnchor="middle">A</text>
+    </svg>
+  );
+}
+// tuile de raccourci (grille 2 colonnes)
+function Tile({color,icon,title,sub,onClick}){
+  return (<div onClick={onClick} style={{borderRadius:18,padding:"16px 14px",
+    cursor:"pointer",border:`1.5px solid ${color}55`,
+    background:`linear-gradient(160deg, ${color}1c 0%, ${T.panel} 70%)`,
+    display:"flex",alignItems:"center",gap:12}}>
+    <span style={{fontSize:28,lineHeight:1}}>{icon}</span>
+    <div style={{minWidth:0}}>
+      <div style={{fontWeight:800,fontSize:14}}>{title}</div>
+      <div style={{fontSize:10,color:T.dim,lineHeight:1.3,
+        overflow:"hidden",textOverflow:"ellipsis"}}>{sub}</div></div></div>);
+}
+function BigCard({color,icon,title,sub,onClick}){
+  return (<div onClick={onClick} style={{flex:1,borderRadius:22,padding:20,
+    cursor:"pointer",border:`1.5px solid ${color}55`,
+    background:`linear-gradient(160deg, ${color}24 0%, ${T.panel} 65%)`,
+    transition:"transform .12s",display:"flex",flexDirection:"column",
+    justifyContent:"space-between",boxShadow:`0 8px 30px ${color}14`}}
+    onMouseDown={e=>e.currentTarget.style.transform="scale(.97)"}
+    onMouseUp={e=>e.currentTarget.style.transform="scale(1)"}
+    onMouseLeave={e=>e.currentTarget.style.transform="scale(1)"}>
+    <div style={{fontSize:54,lineHeight:1}}>{icon}</div>
+    <div>
+      <div style={{fontFamily:"'Archivo',sans-serif",fontWeight:800,fontSize:21,
+        marginTop:10,letterSpacing:-.3,lineHeight:1.05}}>{title}</div>
+      <div style={{fontSize:12,color:T.dim,marginTop:6,lineHeight:1.4}}>{sub}</div>
+    </div></div>);
+}
+
+function NewGame({setTab}){
+  const {members,setMembers,courses,setCourses,games,setGames}=useContext(Ctx);
+  const [type,setType]=useState(DB.lget("newType","simple"));
+  const [subtype,setSubtype]=useState("simple"); // tournoi : 'simple' | 'ryder'
+  const [name,setName]=useState("");
+  const [courseId,setCourseId]=useState(courses[0]?.id);
+  const [mode,setMode]=useState("net");
+  const [selected,setSelected]=useState([]);
+  const [guests,setGuests]=useState([]);
+  const [tees,setTees]=useState({});
+  const [over,setOver]=useState({});  // overrides {playerId:{index}} ajustables pour la partie
+  const [split,setSplit]=useState(null);
+  const [formula,setFormula]=useState(null);
+  // Tournoi multi-manches : chaque manche a SON parcours ET SA répartition (formules)
+  const [rounds,setRounds]=useState([{courseId:courses[0]?.id,split:null}]);
+  const addRound=()=>setRounds([...rounds,{courseId:courses[0]?.id,
+    split:n>=2?autoSplit(n):null}]);
+  const updRound=(i,cid)=>setRounds(rounds.map((r,j)=>j===i?{...r,courseId:cid}:r));
+  const delRound=i=>setRounds(rounds.filter((_,j)=>j!==i));
+  const setRoundSplit=(i,sp)=>setRounds(rounds.map((r,j)=>j===i?{...r,split:sp}:r));
+
+  const refCourseId=type==="event"?(rounds[0]?.courseId):courseId;
+  const course=courses.find(c=>c.id===refCourseId);
+  const teeNames=(course?.tees||[]).map(t=>t.name);
+  const defaultTee=teeNames[0]||"";
+  const allPlayers=[...members.filter(m=>selected.includes(m.id)),...guests];
+  const n=allPlayers.length;
+
+  const toggle=id=>setSelected(selected.includes(id)?selected.filter(x=>x!==id):[...selected,id]);
+  const addGuest=()=>setGuests([...guests,{id:"g"+Date.now(),guest:true,name:"Invité",
+    index:20}]);
+  const updGuest=(id,k,v)=>setGuests(guests.map(g=>g.id===id?{...g,[k]:v}:g));
+  const delGuest=id=>setGuests(guests.filter(g=>g.id!==id));
+  const setTee=(pid,t)=>setTees({...tees,[pid]:t});
+  const getTee=pid=>tees[pid]||defaultTee;
+  // index de jeu réel ajustable pour CETTE partie (défaut = valeur de la fiche)
+  const getIndex=p=>over[p.id]?.index!==undefined?over[p.id].index:p.index;
+  const setOverride=(pid,k,v)=>setOver({...over,[pid]:{...over[pid],[k]:v}});
+
+  const simpleFormulas=n>=2&&n<=4?formulasFor(n):[];
+  useEffect(()=>{if(simpleFormulas.length&&!simpleFormulas.includes(formula))
+    setFormula(simpleFormulas[0]);},[n]);// eslint-disable-line
+  // quand l'effectif change, (ré)initialise la répartition de chaque manche
+  useEffect(()=>{if(type==="event"&&n>=2)
+    setRounds(rs=>rs.map(r=>({...r,split:autoSplit(n)})));},[n,type]);// eslint-disable-line
+
+  const finalName=()=>{const base=name.trim()||(type==="event"?"Event":"Partie");
+    // on dédoublonne sur la date ; l'heure est ajoutée pour distinguer plusieurs parties/jour
+    return base.includes(todayTag())?base:`${base} ${todayTag()} ${timeTag()}`;};
+
+  const create=()=>{
+    if(n<2)return alert("Au moins 2 joueurs.");
+    // Un invité AVEC un index renseigné (>0) devient un joueur permanent du groupe.
+    const keepers=guests.filter(g=>(parseFloat(g.index)||0)>0)
+      .map(g=>({id:g.id,name:g.name?.trim()||"Joueur",nick:g.nick?.trim()||"",
+        index:parseFloat(g.index)||0,profileDone:false,guest:false}));
+    if(keepers.length){
+      const existingIds=new Set(members.map(m=>m.id));
+      const toAdd=keepers.filter(k=>!existingIds.has(k.id));
+      if(toAdd.length) setMembers([...members,...toAdd]);
+    }
+    const roster=allPlayers.map(p=>({...p,tee:getTee(p.id),
+      index:getIndex(p),
+      team:type==="event"?null:undefined}));
+    if(type==="simple"){
+      const ids=roster.map(p=>p.id);
+      const subgames=[{id:1,formula,players:ids,scores:{},validated:[],done:false}];
+      const game={id:Date.now(),name:finalName(),type,courseId,mode,roster,subgames,
+        teamNames:null,done:false,created:Date.now()};
+      setGames([game,...games]);setTab("history");return;
+    }
+    // TOURNOI : chaque manche a SON parcours + SA répartition (formules choisies à la main)
+    const tRounds=(rounds.length?rounds:[{courseId,split:null}]).map((r,ri)=>{
+      const c=courses.find(x=>x.id===r.courseId);
+      let pool=[...roster];let i=1;const subgames=[];
+      (r.split||autoSplit(n)).forEach(grp=>{const gp=pool.splice(0,grp.size);
+        const ids=gp.map(p=>p.id);
+        subgames.push({id:i++,formula:grp.formula,players:ids,
+          scores:{},validated:[],done:false});});
+      return {id:ri+1,courseId:r.courseId,courseName:c?.name||"Parcours",
+        subgames,done:false};
+    });
+    const game={id:Date.now(),name:finalName(),type,subtype,mode,roster,rounds:tRounds,
+      teamNames:["Équipe 1","Équipe 2"],done:false,created:Date.now()};
+    setGames([game,...games]);setTab("history");
+  };
+
+  return (
+    <div>
+      <Section>{type==="simple"?"Nouvelle partie amicale":"Nouveau tournoi"}</Section>
+      <div style={{display:"flex",gap:8,marginBottom:8}}>
+        <Pill active={type==="simple"} onClick={()=>setType("simple")}>Partie amicale</Pill>
+        <Pill active={type==="event"} onClick={()=>setType("event")}>Tournoi</Pill>
+      </div>
+      {type==="event"&&<div style={{display:"flex",gap:8,marginBottom:8}}>
+        <Pill active={subtype==="simple"} onClick={()=>setSubtype("simple")}>Tournoi simple</Pill>
+        <Pill active={subtype==="ryder"} onClick={()=>setSubtype("ryder")}>🏆 Ryder Cup</Pill>
+      </div>}
+      {type==="event"&&subtype==="ryder"&&<div style={{...card(T.us),fontSize:12,
+        color:T.dim,marginBottom:4}}>
+        Ryder Cup : deux équipes, tirage au sort en 3 chapeaux (équilibré par index)
+        à lancer dans le détail du tournoi, et cumul des points sur toutes les manches.</div>}
+
+      <Field label="Nom (la date sera ajoutée)">
+        <input value={name} onChange={e=>setName(e.target.value)}
+          placeholder={`ex: Skins du samedi → ...${todayTag()}`} style={inp}/></Field>
+      <div style={{fontSize:11,color:T.accent,marginTop:4}}>Nom final : {finalName()}</div>
+
+      {type==="simple"?(<>
+        <Section>Parcours</Section>
+        <CourseAutocomplete courses={courses} setCourses={setCourses}
+          courseId={courseId} setCourseId={setCourseId}/>
+      </>):(<>
+        <Section>Manches & parcours</Section>
+        <div style={{fontSize:11,color:T.dim,marginBottom:6}}>
+          Un tournoi = plusieurs manches, chacune sur son parcours. Mêmes équipes et
+          cumul des points sur l'ensemble.</div>
+        {rounds.map((r,i)=>(
+          <div key={i} style={{display:"flex",alignItems:"flex-end",gap:8,marginBottom:6}}>
+            <label style={{flex:1}}>
+              <span style={{fontSize:10,color:T.dim}}>MANCHE {i+1}</span>
+              <select value={r.courseId} onChange={e=>updRound(i,+e.target.value)}
+                style={{...inp,marginTop:2}}>
+                {courses.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select>
+            </label>
+            {rounds.length>1&&<button onClick={()=>delRound(i)}
+              style={{...delBtn,marginBottom:2}}>✕</button>}
+          </div>))}
+        <button onClick={addRound} style={{...delBtn,width:"100%",padding:"8px",
+          color:T.accent,borderColor:T.accent}}>+ Ajouter une manche</button>
+      </>)}
+      <Field label="Décompte"><select value={mode} onChange={e=>setMode(e.target.value)}
+        style={inp}><option value="net">Net (coups rendus)</option>
+        <option value="gross">Brut</option></select></Field>
+
+      <Section>Membres</Section>
+      <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
+        {members.map(m=>(<button key={m.id} onClick={()=>toggle(m.id)} style={{...chip,
+          border:`2px solid ${selected.includes(m.id)?T.accent:T.line}`,
+          background:selected.includes(m.id)?T.panel2:T.panel}}>
+          {dispName(m)} <span style={{color:T.dim}}>({m.index})</span></button>))}
+      </div>
+
+      <Section>Invités</Section>
+      {guests.map(g=>(<div key={g.id} style={card(T.gold)}>
+        <div style={{display:"flex",gap:8}}>
+          <input value={g.name} onChange={e=>updGuest(g.id,"name",e.target.value)}
+            style={{...inp,fontWeight:800,flex:1}}/>
+          <button onClick={()=>delGuest(g.id)} style={delBtn}>✕</button></div>
+        <Field label="Index de jeu (sert au calcul des coups rendus)">
+          <input type="number" step="0.1" value={g.index}
+            onChange={e=>updGuest(g.id,"index",parseFloat(e.target.value)||0)} style={inp}/></Field>
+      </div>))}
+      <button onClick={addGuest} style={{...addBtn,background:T.panel2,color:T.text,
+        border:`1px solid ${T.gold}`}}>+ Ajouter un invité</button>
+
+      {n>0&&teeNames.length>0&&(<>
+        <Section>Départs & index de jeu</Section>
+        <div style={{fontSize:11,color:T.dim,marginBottom:6}}>
+          Départ → CR/Slope. L'<b>index de jeu</b> est le vrai niveau du joueur (souvent
+          différent de son index officiel) : c'est lui qui détermine les coups rendus.
+          Pré-rempli depuis la fiche, ajustable pour cette partie sans modifier la fiche.</div>
+        {allPlayers.map(p=>(
+          <div key={p.id} style={{background:T.panel,borderRadius:8,marginBottom:6,
+            padding:"8px 10px"}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+              <span style={{width:12,height:12,borderRadius:3,background:teeDot(getTee(p.id)),
+                border:`1px solid ${T.line}`,flexShrink:0}}/>
+              <span style={{flex:1,fontSize:13,fontWeight:700}}>{dispName(p)}
+                {p.guest&&<span style={{color:T.gold,fontSize:10,fontWeight:400}}> · invité</span>}
+              </span>
+            </div>
+            <div style={{display:"flex",gap:8,alignItems:"flex-end"}}>
+              <label style={{flex:1}}>
+                <span style={{fontSize:10,color:T.dim}}>DÉPART</span>
+                <select value={getTee(p.id)} onChange={e=>setTee(p.id,e.target.value)}
+                  style={{...inp,marginTop:2}}>
+                  {teeNames.map(t=><option key={t} value={t}>{t}</option>)}</select></label>
+              <label style={{width:110}}>
+                <span style={{fontSize:10,color:T.dim}}>INDEX DE JEU</span>
+                <input type="number" step="0.1" value={getIndex(p)}
+                  onChange={e=>setOverride(p.id,"index",parseFloat(e.target.value)||0)}
+                  style={{...inp,marginTop:2,textAlign:"center"}}/></label>
+            </div>
+          </div>))}
+      </>)}
+
+      <div style={{marginTop:14,padding:"10px 12px",background:T.panel,borderRadius:10,
+        fontSize:13}}>👥 {n} joueur{n>1?"s":""} sélectionné{n>1?"s":""}</div>
+
+      {type==="simple"&&(n>=2&&n<=4?(<>
+        <Section>Formule ({n} joueurs)</Section>
+        <select value={formula||""} onChange={e=>setFormula(e.target.value)} style={inp}>
+          {simpleFormulas.map(f=><option key={f} value={f}>{FORMULA_LABELS[f]}</option>)}</select>
+        {n===3&&formula==="chouette"&&<ChouetteInfo/>}
+      </>):n>4?<Warn>Partie amicale = 2 à 4 joueurs. Passe en "Tournoi" pour {n}.</Warn>:null)}
+
+      {type==="event"&&n>=2&&(<>
+        <Section>Formules par manche (modifiable)</Section>
+        <div style={{fontSize:11,color:T.dim,marginBottom:6}}>
+          Chaque manche/jour peut avoir des formules différentes : scramble un jour,
+          meilleure-moins bonne un autre, mexicaine le suivant… À toi de choisir.</div>
+        {rounds.map((r,ri)=>{
+          const c=courses.find(x=>x.id===r.courseId);
+          const sp=r.split||autoSplit(n);
+          return (
+            <div key={ri} style={{...card(T.gold)}}>
+              <div style={{fontWeight:800,marginBottom:6,display:"flex",
+                alignItems:"center",gap:8}}>
+                <span style={{background:T.gold,color:"#1a1200",borderRadius:6,
+                  padding:"2px 8px",fontSize:12}}>MANCHE {ri+1}</span>
+                <span style={{fontSize:13}}>{c?.name}</span></div>
+              {sp.map((grp,gi)=>(
+                <div key={gi} style={{marginBottom:6}}>
+                  <span style={{fontSize:10,color:T.dim}}>Match {gi+1} · {grp.size} joueurs</span>
+                  <select value={grp.formula} onChange={e=>setRoundSplit(ri,
+                    sp.map((x,k)=>k===gi?{...x,formula:e.target.value}:x))}
+                    style={{...inp,marginTop:2}}>
+                    {formulasFor(grp.size).map(f=>
+                      <option key={f} value={f}>{FORMULA_LABELS[f]}</option>)}</select>
+                </div>))}
+            </div>
+          );
+        })}
+        <div style={{...card(T.eu),fontSize:12,color:T.dim,marginTop:4}}>
+          ℹ️ Les joueurs démarrent <b>non affectés</b>. Tu formeras les équipes
+          (Équipe 1 / Équipe 2, renommables) dans le détail du tournoi.</div>
+      </>)}
+
+      <button onClick={create} style={{...addBtn,fontFamily:"'Archivo',sans-serif",fontSize:17,
+        letterSpacing:.5,marginTop:16}}>▶ CRÉER & DÉMARRER</button>
+    </div>
+  );
+}
+function ChouetteInfo(){return <div style={{...card(T.gold),fontSize:12,color:T.dim,marginTop:8}}>
+  🦉 Chouette : 6 pts/trou. 1er 4 · 2e 2 · 3e 0. Égalités : 1ers 3/3/0 · 2es 4/1/1 ·
+  triple nul 2/2/2.</div>;}
+function EventSplit({split,setSplit}){
+  const change=(i,f)=>setSplit(split.map((g,j)=>j===i?{...g,formula:f}:g));
+  return (<div>{split.map((g,i)=>(<div key={i} style={card(T.accent)}>
+    <div style={{fontWeight:800,marginBottom:6}}>Match {i+1} · {g.size} joueurs</div>
+    <select value={g.formula} onChange={e=>change(i,e.target.value)} style={inp}>
+      {formulasFor(g.size).map(f=><option key={f} value={f}>{FORMULA_LABELS[f]}</option>)}
+    </select></div>))}</div>);
+}
+
+/* ===== Autocomplétion parcours (API live, repli manuel) ===== */
+function CourseAutocomplete({courses,setCourses,courseId,setCourseId}){
+  const sel=courses.find(c=>c.id===courseId);
+  const [q,setQ]=useState(sel?.name||"");
+  const [sugg,setSugg]=useState([]);
+  const [open,setOpen]=useState(false);
+  const [status,setStatus]=useState("");
+
+  // recherche : d'abord parcours déjà enregistrés, puis API
+  useEffect(()=>{
+    if(!q || q.length<2){ setSugg([]); return; }
+    const local=courses.filter(c=>c.name.toLowerCase().includes(q.toLowerCase()))
+      .map(c=>({local:true,course:c}));
+    let cancelled=false;
+    const id=setTimeout(async()=>{
+      let api=[];
+      try{
+        setStatus("Recherche…");
+        const res=await GolfAPI.search(q);
+        api=res.map(c=>({local:false,raw:c,
+          label:`${c.club_name} — ${c.course_name}`}));
+        setStatus("");
+      }catch(e){
+        if(e.kind==="nokey") setStatus("➕ Saisie manuelle (ajoute ta clé API dans Réglages pour l'auto-complétion mondiale)");
+        else setStatus("API indisponible (CORS) — utilise la saisie manuelle.");
+      }
+      if(!cancelled) setSugg([...local,...api]);
+    },350);
+    return ()=>{cancelled=true;clearTimeout(id);};
+  },[q]);// eslint-disable-line
+
+  const pickLocal=c=>{ setCourseId(c.id); setQ(c.name); setOpen(false); };
+  const pickApi=raw=>{
+    const c=GolfAPI.toCourse(raw);
+    setCourses(prev=>[...prev,c]);
+    setCourseId(c.id); setQ(c.name); setOpen(false); setStatus("✅ Parcours importé");
+  };
+  const createManual=()=>{
+    const c={id:Date.now(),name:q||"Nouveau parcours",country:"France",par:72,
+      si:Array.from({length:18},(_,i)=>i+1),tees:[{name:"Jaune",cr:72,slope:130,par:72}]};
+    setCourses(prev=>[...prev,c]); setCourseId(c.id); setOpen(false);
+    setStatus("Créé — complète départs/SSS dans l'onglet Parcours");
+  };
+
+  return (
+    <div style={{position:"relative"}}>
+      <Field label="Parcours (tape pour rechercher)">
+        <input value={q} onFocusCapture={()=>setOpen(true)}
+          onChange={e=>{setQ(e.target.value);setOpen(true);}}
+          placeholder="ex: Golf de Pals…" style={inp}/></Field>
+      {status && <div style={{fontSize:11,color:T.gold,marginTop:4}}>{status}</div>}
+      {open && sugg.length>0 && (
+        <div style={{background:T.panel2,border:`1px solid ${T.line}`,borderRadius:10,
+          marginTop:4,overflow:"hidden"}}>
+          {sugg.map((s,i)=>(
+            <div key={i} onClick={()=>s.local?pickLocal(s.course):pickApi(s.raw)}
+              style={{padding:"9px 11px",cursor:"pointer",fontSize:13,
+              borderBottom:`1px solid ${T.line}33`}}>
+              {s.local? <><b>{s.course.name}</b> <span style={{color:T.accent,
+                fontSize:10}}>· enregistré</span></>
+                : <><b>{s.label}</b> <span style={{color:T.dim,fontSize:10}}>· importer</span></>}
+            </div>))}
+        </div>
+      )}
+      {open && q.length>=2 && (
+        <div onClick={createManual} style={{padding:"8px 11px",marginTop:4,
+          background:T.panel,borderRadius:8,fontSize:12,color:T.accent,cursor:"pointer"}}>
+          ➕ Créer « {q} » manuellement</div>
+      )}
+    </div>
+  );
+}
+
+/* ===== CHAMPIONNAT : points 2/1/0 par joueur, cumulé + moyenne + confrontations ===== */
+function Championship(){
+  const {games,members,courses}=useContext(Ctx);
+  const done=games.filter(g=>g.done);
+  const stats=useMemo(()=>{
+    const S={}; // id -> {pts,played,win,draw,loss}
+    const ensure=id=>{if(!S[id])S[id]={pts:0,played:0,win:0,draw:0,loss:0};return S[id];};
+    const H={}; // "idA|idB" -> {a,b,nul} du point de vue idA<idB
+    done.forEach(g=>{
+      const net=g.mode==="net";
+      // liste unifiée {sg, course} : tournoi (rounds) ou amicale/partie (subgames)
+      const subs=g.rounds
+        ? g.rounds.flatMap(r=>r.subgames.map(sg=>({sg,course:courses.find(c=>c.id===r.courseId)})))
+        : (g.subgames||[]).map(sg=>({sg,course:courses.find(c=>c.id===g.courseId)}));
+      subs.forEach(({sg,course})=>{
+        const ps=sg.players.map(id=>g.roster.find(p=>p.id===id)).filter(Boolean);
+        const {pts,h2h}=playerScores(sg,ps,course,net);
+        Object.entries(pts).forEach(([id,pt])=>{
+          const s=ensure(id);s.pts+=pt;s.played++;
+          if(pt===2)s.win++;else if(pt===1)s.draw++;else s.loss++;});
+        h2h.forEach(({a,b,res})=>{
+          const key=a<b?`${a}|${b}`:`${b}|${a}`;
+          if(!H[key])H[key]={a:0,b:0,nul:0};
+          const flip=!(a<b);
+          if(res==="nul")H[key].nul++;
+          else if((res==="a")!==flip)H[key].a++;else H[key].b++;
+        });
+      });
+    });
+    return {S,H};
+  },[done,courses]);
+
+  const rows=members.map(m=>({m,...(stats.S[m.id]||{pts:0,played:0,win:0,draw:0,loss:0})}))
+    .map(r=>({...r,avg:r.played?r.pts/r.played:0}));
+  const byTotal=[...rows].filter(r=>r.played>0).sort((a,b)=>b.pts-a.pts||b.avg-a.avg);
+  const byAvg=[...rows].filter(r=>r.played>0).sort((a,b)=>b.avg-a.avg||b.pts-a.pts);
+
+  if(!done.length) return <Empty text="Aucune partie terminée. Valide des parties pour alimenter le championnat."/>;
+
+  return (
+    <div>
+      <Section>Championnat</Section>
+      <div style={{...card(T.gold),fontSize:12,color:T.dim}}>
+        🏅 Points <b style={{color:T.text}}>2 victoire · 1 nul · 0 défaite</b> par joueur, sur
+        chaque match. Un tournoi compte une partie <b style={{color:T.text}}>par manche</b> :
+        une Ryder à 4 parcours pèse donc ×4 une partie amicale. Deux classements :
+        {" "}<b style={{color:T.text}}>cumulé</b> (qui joue plus marque plus) et
+        {" "}<b style={{color:T.text}}>moyenne par partie</b> (pour ne pas pénaliser ceux qui
+        jouent moins).</div>
+
+      <div style={{display:"flex",gap:10,marginTop:4}}>
+        <RankCol title="🔢 CUMULÉ" rows={byTotal} metric={r=>r.pts} unit="pts"/>
+        <RankCol title="📊 MOYENNE" rows={byAvg} metric={r=>r.avg.toFixed(2)} unit="pts/p."/>
+      </div>
+
+      <Section>Confrontations (face-à-face)</Section>
+      <H2HTable H={stats.H} members={members}/>
+    </div>
+  );
+}
+function RankCol({title,rows,metric,unit}){
+  return (
+    <div style={{flex:1,background:T.panel,borderRadius:12,padding:10,
+      border:`1px solid ${T.line}`}}>
+      <div style={{fontFamily:"Anton",fontSize:13,marginBottom:8,letterSpacing:.5}}>{title}</div>
+      {rows.map((r,i)=>(
+        <div key={r.m.id} style={{display:"flex",alignItems:"center",gap:6,
+          padding:"5px 0",borderBottom:i<rows.length-1?`1px solid ${T.line}33`:"none"}}>
+          <span style={{fontFamily:"Anton",fontSize:15,width:18,
+            color:i===0?T.gold:T.dim}}>{i+1}</span>
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{fontWeight:800,fontSize:13,whiteSpace:"nowrap",overflow:"hidden",
+              textOverflow:"ellipsis"}}>{dispName(r.m)}</div>
+            <div style={{fontSize:9,color:T.dim}}>{r.played}p · {r.win}V {r.draw}N {r.loss}D</div>
+          </div>
+          <span style={{fontFamily:"Anton",fontSize:16,
+            color:i===0?T.gold:T.accent}}>{metric(r)}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+function H2HTable({H,members}){
+  const entries=Object.entries(H);
+  if(!entries.length) return <Empty text="Pas encore de confrontations individuelles."/>;
+  const name=id=>{const m=members.find(x=>String(x.id)===String(id));return m?dispName(m):"?";};
+  return (
+    <div>
+      {entries.map(([key,r])=>{
+        const [a,b]=key.split("|");
+        const lead=r.a>r.b?T.accent:r.b>r.a?T.us:T.dim;
+        return (
+          <div key={key} style={{...card(lead),display:"flex",alignItems:"center",
+            gap:8,padding:"10px 12px"}}>
+            <span style={{flex:1,fontWeight:800,textAlign:"right"}}>{name(a)}</span>
+            <span style={{fontFamily:"Anton",fontSize:18,minWidth:64,textAlign:"center"}}>
+              {r.a} - {r.b}</span>
+            <span style={{flex:1,fontWeight:800}}>{name(b)}</span>
+            {r.nul>0&&<span style={{fontSize:10,color:T.dim}}>({r.nul} nul)</span>}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function PlayersTab(){
+  const {members,setMembers}=useContext(Ctx);
+  const upd=(id,k,v)=>setMembers(members.map(m=>m.id===id?{...m,[k]:v}:m));
+  const del=id=>setMembers(members.filter(m=>m.id!==id));
+  const add=()=>setMembers([...members,{id:Date.now(),name:"",nick:"",index:20}]);
+  return (
+    <div>
+      <Section>Joueurs membres ({members.length})</Section>
+      <div style={{...card(T.gold),fontSize:12,color:T.dim}}>
+        👤 Pour chaque joueur : son <b style={{color:T.text}}>prénom</b> et surtout son
+        <b style={{color:T.text}}> surnom</b>, qui sera affiché partout dans l'app.
+        L'<b style={{color:T.text}}>index de jeu</b> (vrai niveau) sert de valeur par
+        défaut, ajustable à chaque partie.</div>
+      {members.map(m=>(
+        <div key={m.id} style={card(T.accent)}>
+          <div style={{display:"flex",gap:8,alignItems:"center"}}>
+            <span style={{fontFamily:"Anton",fontSize:18,color:T.gold,minWidth:0,
+              flex:"0 0 auto",maxWidth:120,overflow:"hidden",textOverflow:"ellipsis",
+              whiteSpace:"nowrap"}}>{dispName(m)}</span>
+            <button onClick={()=>del(m.id)} style={{...delBtn,marginLeft:"auto"}}>✕</button>
+          </div>
+          <div style={{display:"flex",gap:8}}>
+            <Field label="Prénom"><input value={m.name}
+              onChange={e=>upd(m.id,"name",e.target.value)} placeholder="ex: Jean-Pierre"
+              style={inp}/></Field>
+            <Field label="Surnom (affiché)"><input value={m.nick||""}
+              onChange={e=>upd(m.id,"nick",e.target.value)} placeholder="ex: JP"
+              style={{...inp,borderColor:T.gold}}/></Field>
+          </div>
+          <Field label="Index de jeu (vrai niveau, sert au calcul)">
+            <input type="number" step="0.1" value={m.index}
+              onChange={e=>upd(m.id,"index",parseFloat(e.target.value)||0)} style={inp}/></Field>
+          <div style={{display:"flex",gap:8}}>
+            <Field label="Email"><input type="email" value={m.email||""}
+              onChange={e=>upd(m.id,"email",e.target.value)} placeholder="pour les résultats"
+              style={inp}/></Field>
+            <Field label="Mobile"><input type="tel" value={m.mobile||""}
+              onChange={e=>upd(m.id,"mobile",e.target.value)} placeholder="06 12 34 56 78"
+              style={inp}/></Field>
+          </div>
+        </div>
+      ))}
+      <button onClick={add} style={addBtn}>+ Ajouter un joueur membre</button>
+    </div>
+  );
+}
+
+function SettingsTab(){
+  const {user,setUser}=useContext(Ctx);
+  const [apiKey,setApiKey]=useState(DB.lget("apiKey",""));
+  const [saved,setSaved]=useState(false);
+  const [diag,setDiag]=useState("");
+  const [wa,setWa]=useState(DB.lget("waGroup",""));
+  const [waSaved,setWaSaved]=useState(false);
+  // mon profil (compte connecté)
+  const [prof,setProf]=useState({name:user?.name||"",nick:user?.nick||"",
+    email:user?.email||"",mobile:user?.mobile||""});
+  const [profSaved,setProfSaved]=useState(false);
+  const saveProf=()=>{setUser({...user,name:prof.name.trim()||user?.name,
+    nick:prof.nick.trim(),email:prof.email.trim(),mobile:prof.mobile.trim()});
+    setProfSaved(true);setTimeout(()=>setProfSaved(false),1500);};
+  // service email (stocké, actif seulement avec Supabase) — plus de SMS (payant)
+  const [mail,setMail]=useState(DB.lget("mailSvc",{provider:"resend",key:"",from:""}));
+  const [msgSaved,setMsgSaved]=useState(false);
+  const save=()=>{DB.lset("apiKey",apiKey.trim());setSaved(true);setTimeout(()=>setSaved(false),1500);};
+  const saveWa=()=>{DB.lset("waGroup",wa.trim());setWaSaved(true);setTimeout(()=>setWaSaved(false),1500);};
+  const saveMsg=()=>{DB.lset("mailSvc",mail);
+    setMsgSaved(true);setTimeout(()=>setMsgSaved(false),1500);};
+  return (
+    <div>
+      <Section>Réglages</Section>
+
+      <div style={card(T.eu)}>
+        <div style={{fontWeight:800,marginBottom:8}}>👤 Mon profil</div>
+        <div style={{display:"flex",gap:8}}>
+          <Field label="Prénom"><input value={prof.name}
+            onChange={e=>setProf({...prof,name:e.target.value})} style={inp}/></Field>
+          <Field label="Surnom (affiché)"><input value={prof.nick}
+            onChange={e=>setProf({...prof,nick:e.target.value})}
+            placeholder="ex: Passe-partout" style={{...inp,borderColor:T.gold}}/></Field>
+        </div>
+        <Field label="Email"><input type="email" value={prof.email}
+          onChange={e=>setProf({...prof,email:e.target.value})} style={inp}/></Field>
+        <Field label="Mobile"><input type="tel" value={prof.mobile}
+          onChange={e=>setProf({...prof,mobile:e.target.value})}
+          placeholder="06 12 34 56 78" style={inp}/></Field>
+        <button onClick={saveProf} style={{...addBtn,background:T.eu,color:"#fff"}}>
+          {profSaved?"✅ Profil enregistré":"Enregistrer mon profil"}</button>
+      </div>
+
+      <div style={card(T.accent)}>
+        <div style={{fontWeight:800,marginBottom:6}}>🔑 Clé GolfCourseAPI</div>
+        <div style={{fontSize:12,color:T.dim,marginBottom:8,lineHeight:1.5}}>
+          Colle ta clé une seule fois ici. Elle permet de rechercher n'importe quel parcours
+          du monde et d'importer automatiquement ses départs, SSS/Slope, et le par + handicap
+          de chaque trou (pour calculer les coups rendus). Compte gratuit sur golfcourseapi.com.</div>
+        <input value={apiKey} onChange={e=>setApiKey(e.target.value)}
+          placeholder="Colle ta clé ici" style={inp}/>
+        <button onClick={save} style={addBtn}>{saved?"✅ Enregistrée":"Enregistrer la clé"}</button>
+        <button onClick={async()=>{DB.lset("apiKey",apiKey.trim());setDiag("Test en cours…");
+          setDiag(await GolfAPI.test());}}
+          style={{...delBtn,width:"100%",marginTop:8,padding:"12px"}}>🔌 Tester la connexion</button>
+        {diag&&<div style={{fontSize:12,marginTop:10,padding:"10px 12px",background:T.bg,
+          borderRadius:10,border:`1px solid ${T.line}`,lineHeight:1.5,color:T.text}}>{diag}</div>}
+      </div>
+
+      <div style={card(T.violet)}>
+        <div style={{fontWeight:800,marginBottom:4}}>📨 Notifications</div>
+        <div style={{fontSize:11,color:T.dim,marginBottom:10,lineHeight:1.5}}>
+          Les résultats se partagent <b style={{color:T.text}}>gratuitement sur WhatsApp</b>
+          {" "}(bouton « Partager » sur une partie terminée → ton groupe). Pas de SMS : l'envoi
+          de SMS est payant. L'email automatique ci-dessous sera activé avec Supabase.</div>
+
+        <div style={{fontSize:11,color:T.dim,textTransform:"uppercase",letterSpacing:.5,
+          fontWeight:700,marginBottom:6}}>✉️ Service email (optionnel, plus tard)</div>
+        <div style={{fontSize:11,color:T.gold,marginBottom:8,
+          background:`${T.gold}1a`,border:`1px solid ${T.gold}44`,borderRadius:10,
+          padding:"8px 10px",lineHeight:1.5}}>
+          ⏳ Activé une fois Supabase branché (l'envoi passe par un serveur sécurisé).</div>
+        <select value={mail.provider} onChange={e=>setMail({...mail,provider:e.target.value})}
+          style={{...inp,marginTop:0}}>
+          <option value="resend">Resend (gratuit jusqu'à un volume)</option>
+          <option value="sendgrid">SendGrid</option>
+          <option value="brevo">Brevo (ex-Sendinblue)</option>
+        </select>
+        <input value={mail.key} onChange={e=>setMail({...mail,key:e.target.value})}
+          placeholder="Clé API email" style={{...inp,marginTop:8}}/>
+        <input value={mail.fromName||""} onChange={e=>setMail({...mail,fromName:e.target.value})}
+          placeholder="Nom affiché (ex: Du Golf & des Amis)" style={{...inp,marginTop:8}}/>
+        <input value={mail.from} onChange={e=>setMail({...mail,from:e.target.value})}
+          placeholder="Email expéditeur" style={{...inp,marginTop:8}}/>
+        <div style={{fontSize:10,color:T.dim,marginTop:6,lineHeight:1.4}}>
+          💡 Le « nom affiché » est ce que voient tes amis (ex. « Du Golf & des Amis »).
+          Avec un service email, l'adresse réelle peut rester masquée derrière ce nom — ce que
+          Gmail seul ne permet pas.</div>
+
+        <button onClick={saveMsg} style={{...addBtn,background:T.violet,color:"#fff"}}>
+          {msgSaved?"✅ Enregistré":"Enregistrer"}</button>
+      </div>
+
+      <div style={card("#25D366")}>
+        <div style={{fontWeight:800,marginBottom:6}}>💬 Groupe WhatsApp des adhérents</div>
+        <div style={{fontSize:12,color:T.dim,marginBottom:8,lineHeight:1.5}}>
+          Colle ici le lien d'invitation de votre groupe WhatsApp (dans WhatsApp : Infos du
+          groupe → Inviter via un lien → Copier). Un bouton « Discuter » apparaîtra sur
+          l'accueil pour rejoindre/ouvrir le groupe avant les parties.</div>
+        <input value={wa} onChange={e=>setWa(e.target.value)}
+          placeholder="https://chat.whatsapp.com/..." style={inp}/>
+        <button onClick={saveWa} style={{...addBtn,background:"#25D366",color:"#062b14"}}>
+          {waSaved?"✅ Enregistré":"Enregistrer le lien"}</button>
+      </div>
+
+      <div style={{...card(T.gold),fontSize:12,color:T.dim}}>
+        ℹ️ Note : l'appel direct depuis le navigateur peut être bloqué (CORS). Si la recherche
+        mondiale ne répond pas, l'app bascule sur tes parcours enregistrés + la saisie manuelle.
+        Le branchement Supabase (à venir) servira de relais pour fiabiliser cette recherche.</div>
+    </div>
+  );
+}
+
+function CoursesTab(){
+  const {courses,setCourses}=useContext(Ctx);
+  const [q,setQ]=useState("");
+  const upd=(id,k,v)=>setCourses(courses.map(c=>c.id===id?{...c,[k]:v}:c));
+  const del=id=>setCourses(courses.filter(c=>c.id!==id));
+  const add=()=>setCourses([{id:Date.now(),name:"Nouveau parcours",
+    country:"France",par:72,si:Array.from({length:18},(_,i)=>i+1),
+    tees:[{name:"Jaune",cr:72,slope:130,par:72}]},...courses]);
+  const filtered=q?courses.filter(c=>c.name.toLowerCase().includes(q.toLowerCase())):courses;
+  return (
+    <div>
+      <Section>Mes parcours ({courses.length})</Section>
+      <div style={{...card(T.gold),fontSize:12,color:T.dim}}>
+        🗺️ <b style={{color:T.text}}>Base de parcours persistante.</b> Saisis un parcours
+        une seule fois (départs + SSS/Slope/Par) : il est mémorisé pour toujours et
+        réutilisable dans toutes tes parties. Idéal pour préparer un trip à l'avance
+        (Catalogne déjà chargée, Irlande, etc.) — tout sera prêt pour calculer les
+        coups rendus le jour J.</div>
+      <input value={q} onChange={e=>setQ(e.target.value)}
+        placeholder="🔍 Filtrer mes parcours…" style={inp}/>
+      <button onClick={add} style={addBtn}>+ Ajouter un parcours (avance de phase)</button>
+      <div style={{marginTop:10}}>
+        {filtered.map(c=><CourseCard key={c.id} c={c} upd={upd} del={del}/>)}
+        {filtered.length===0&&<Empty text="Aucun parcours ne correspond."/>}
+      </div>
+    </div>
+  );
+}
+function CourseCard({c,upd,del}){
+  const setTees=tees=>upd(c.id,"tees",tees);
+  const addTee=()=>{const preset=TEE_PRESETS[c.country]||TEE_PRESETS.France;
+    const used=(c.tees||[]).map(t=>t.name);
+    const next=preset.find(x=>!used.includes(x))||("Départ "+((c.tees?.length||0)+1));
+    setTees([...(c.tees||[]),{name:next,cr:72,slope:130,par:c.par||72}]);};
+  const updTee=(i,k,v)=>setTees(c.tees.map((t,j)=>j===i?{...t,[k]:v}:t));
+  const delTee=i=>setTees(c.tees.filter((_,j)=>j!==i));
+  const preset=TEE_PRESETS[c.country]||TEE_PRESETS.France;
+  return (
+    <div style={card(T.accent)}>
+      <div style={{display:"flex",gap:8}}>
+        <input value={c.name} onChange={e=>upd(c.id,"name",e.target.value)}
+          style={{...inp,fontWeight:800,flex:1}}/>
+        <button onClick={()=>del(c.id)} style={delBtn}>✕</button></div>
+      <div style={{display:"flex",gap:8,marginTop:8}}>
+        <Field label="Pays (norme couleurs)">
+          <select value={c.country||"France"} onChange={e=>upd(c.id,"country",e.target.value)}
+            style={inp}>{Object.keys(TEE_PRESETS).map(k=><option key={k}>{k}</option>)}</select>
+        </Field>
+        <Field label="Par parcours"><input type="number" value={c.par??72}
+          onChange={e=>upd(c.id,"par",+e.target.value)} style={inp}/></Field>
+      </div>
+      <div style={{fontSize:11,color:T.dim,margin:"10px 0 4px",fontWeight:700}}>
+        DÉPARTS (couleur · CR/SSS · Slope · Par)</div>
+      {(c.tees||[]).map((t,i)=>(
+        <div key={i} style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
+          <span style={{width:12,height:12,borderRadius:3,background:teeDot(t.name),
+            border:`1px solid ${T.line}`,flexShrink:0}}/>
+          <select value={t.name} onChange={e=>updTee(i,"name",e.target.value)}
+            style={{...inp,marginTop:0,width:90,padding:"6px"}}>
+            {[...new Set([...preset,t.name])].map(p=><option key={p}>{p}</option>)}</select>
+          <input type="number" step="0.1" value={t.cr} placeholder="CR"
+            onChange={e=>updTee(i,"cr",parseFloat(e.target.value))}
+            style={{...inp,marginTop:0,padding:"6px",textAlign:"center"}}/>
+          <input type="number" value={t.slope} placeholder="Slope"
+            onChange={e=>updTee(i,"slope",+e.target.value)}
+            style={{...inp,marginTop:0,padding:"6px",textAlign:"center"}}/>
+          <input type="number" value={t.par} placeholder="Par"
+            onChange={e=>updTee(i,"par",+e.target.value)}
+            style={{...inp,marginTop:0,padding:"6px",width:44,textAlign:"center"}}/>
+          <input type="number" value={t.length||""} placeholder="m"
+            onChange={e=>updTee(i,"length",+e.target.value||undefined)}
+            style={{...inp,marginTop:0,padding:"6px",width:56,textAlign:"center"}}/>
+          <button onClick={()=>delTee(i)} style={{...delBtn,padding:"4px 8px"}}>✕</button>
+        </div>))}
+      <button onClick={addTee} style={{...delBtn,width:"100%",padding:"8px",
+        color:T.accent,borderColor:T.accent}}>+ Ajouter un départ</button>
+
+      <HoleEditor c={c} upd={upd}/>
+    </div>
+  );
+}
+
+// Édition du par et du stroke index (HCP) trou par trou
+function HoleEditor({c,upd}){
+  const [open,setOpen]=useState(false);
+  const pars=(c.pars&&c.pars.length===18)?c.pars:holePars(c);
+  const si=(c.si&&c.si.length===18)?c.si:Array.from({length:18},(_,i)=>i+1);
+  const setPar=(i,v)=>{const a=[...pars];a[i]=+v||0;upd(c.id,"pars",a);};
+  const setSi=(i,v)=>{const a=[...si];a[i]=+v||0;upd(c.id,"si",a);};
+  const Block=({from,to,label})=>(
+    <div style={{marginBottom:10}}>
+      <div style={{fontSize:10,color:T.dim,fontWeight:700,marginBottom:3}}>{label}</div>
+      <table style={{borderCollapse:"collapse",width:"100%",tableLayout:"fixed",fontSize:11}}>
+        <tbody>
+          <tr><td style={{...td,textAlign:"left",color:T.dim,width:"14%"}}>Tr</td>
+            {Array.from({length:to-from},(_,k)=><td key={k} style={{...td,color:T.dim}}>{from+k+1}</td>)}</tr>
+          <tr><td style={{...td,textAlign:"left",color:T.dim}}>Par</td>
+            {Array.from({length:to-from},(_,k)=>{const i=from+k;
+              return <td key={i} style={{...td,padding:1}}>
+                <input type="number" value={pars[i]} onChange={e=>setPar(i,e.target.value)}
+                  style={{...cell,width:"100%",padding:"4px 0"}}/></td>;})}</tr>
+          <tr><td style={{...td,textAlign:"left",color:T.gold}}>HCP</td>
+            {Array.from({length:to-from},(_,k)=>{const i=from+k;
+              return <td key={i} style={{...td,padding:1}}>
+                <input type="number" value={si[i]} onChange={e=>setSi(i,e.target.value)}
+                  style={{...cell,width:"100%",padding:"4px 0",borderColor:T.gold}}/></td>;})}</tr>
+        </tbody>
+      </table>
+    </div>
+  );
+  return (
+    <div style={{marginTop:10}}>
+      <button onClick={()=>setOpen(!open)} style={{...miniBtn,width:"100%"}}>
+        {open?"▲ Masquer":"▼ Modifier le Par et le HCP (coups rendus) trou par trou"}</button>
+      {open&&<div style={{marginTop:10}}>
+        <div style={{fontSize:11,color:T.dim,marginBottom:8,lineHeight:1.4}}>
+          Corrige ici le <b>Par</b> et le <b>HCP</b> (stroke index : 1 = trou le plus dur,
+          18 = le plus facile) d'après la vraie carte du parcours. Le HCP détermine les coups rendus.</div>
+        <Block from={0} to={9} label="Aller · trous 1-9"/>
+        <Block from={9} to={18} label="Retour · trous 10-18"/>
+      </div>}
+    </div>
+  );
+}
+
+function History(){
+  const {games,setGames,members,courses}=useContext(Ctx);
+  const [open,setOpen]=useState(null);
+  const delGame=(id,e)=>{e.stopPropagation();
+    if(confirm("Supprimer définitivement cette partie de l'historique ?"))
+      setGames(games.filter(x=>x.id!==id));};
+  if(!games.length) return <Empty text="Aucune partie. Crée-en une depuis l'accueil."/>;
+  if(open){const g=games.find(x=>x.id===open);
+    if(g) return <GameDetail g={g} members={members} courses={courses} games={games}
+      setGames={setGames} back={()=>setOpen(null)}/>;}
+  return (<div><Section>Historique ({games.length})</Section>
+    {games.map(g=>(<div key={g.id} onClick={()=>setOpen(g.id)}
+      style={{...card(g.done?T.accent:T.gold),cursor:"pointer",
+        display:"flex",alignItems:"center",gap:8}}>
+      <div style={{flex:1}}>
+        <div style={{fontWeight:800}}>{g.name}</div>
+        <div style={{fontSize:11,color:T.dim}}>{g.type==="event"?(g.subtype==="ryder"?"🏆 Ryder Cup":"🏆 Tournoi"):"⛳ Partie amicale"} ·
+          {g.roster?.length} joueurs · {g.done?"terminé":"en cours"} · tap pour ouvrir</div>
+      </div>
+      <button onClick={e=>delGame(g.id,e)} style={{...delBtn,flexShrink:0}}>🗑</button>
+    </div>))}</div>);
+}
+
+// Choix du scoreur d'UNE sous-partie (flight). Chaque partie qui se joue désigne le
+// sien : seul lui saisit cette partie, les autres la suivent en lecture seule.
+function ScorerPicker({sg,label,players,scorerId,canEdit,myId,onPick,playerById}){
+  return (
+    <div style={{...card(T.violet),marginBottom:10}}>
+      <div style={{fontWeight:800,marginBottom:6}}>
+        ✍️ Qui tient la carte ?{label?<span style={{color:T.gold}}> · {label}</span>:null}</div>
+      <div style={{fontSize:11,color:T.dim,marginBottom:8}}>
+        Le scoreur de cette partie saisit ses scores. Les autres la suivent en direct (lecture seule).</div>
+      <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+        {players.map(p=>{const isS=String(scorerId)===String(p.id);
+          return (<button key={p.id} onClick={()=>onPick(p.id)}
+            style={{padding:"7px 12px",borderRadius:999,cursor:"pointer",
+              border:`1.5px solid ${isS?T.accent:T.line}`,
+              background:isS?T.accent:T.panel,color:isS?T.ink:T.text,
+              fontWeight:800,fontSize:12}}>
+            {isS?"✍️ ":""}{dispName(p)}</button>);})}
+      </div>
+      {scorerId&&!canEdit&&<div style={{fontSize:11,color:T.gold,marginTop:8}}>
+        👀 Lecture seule — {dispName(playerById(scorerId))} tient cette carte.</div>}
+      {scorerId&&canEdit&&<div style={{fontSize:11,color:T.accent,marginTop:8}}>
+        ✍️ C'est toi qui tiens cette carte.</div>}
+    </div>
+  );
+}
+
+function GameDetail({g,members,courses,games,setGames,back}){
+  const {user}=useContext(Ctx);
+  const isTournament=!!g.rounds;
+  const playerById=id=>g.roster.find(p=>p.id===id)||members.find(m=>m.id===id);
+  const save=ng=>setGames(games.map(x=>x.id===g.id?ng:x));
+  // Scoreur DÉSIGNÉ PAR SOUS-PARTIE (flight) : chaque partie qui se joue a son propre
+  // scoreur. On ne peut saisir QUE sa propre partie, pas "celle de derrière".
+  const myId=user?.id;
+  const setScorerSimple=(sgId,pid)=>save({...g,subgames:g.subgames.map(sg=>
+    sg.id!==sgId?sg:{...sg,scorerId:sg.scorerId===pid?null:pid})});
+  const setScorerRound=(rid,sgId,pid)=>save({...g,rounds:g.rounds.map(r=>
+    r.id!==rid?r:{...r,subgames:r.subgames.map(sg=>
+      sg.id!==sgId?sg:{...sg,scorerId:sg.scorerId===pid?null:pid})})});
+  // scoreur effectif d'une sous-partie (rétro-compat : ancien scoreur global pour une amicale à 1 flight)
+  const scorerOf=sg=>sg.scorerId!=null?sg.scorerId
+    :((g.subgames&&g.subgames.length===1)?g.scorerId:undefined);
+  // qui peut saisir CETTE sous-partie ? son scoreur. Si aucun scoreur défini, tout le monde peut.
+  const canEditSub=sg=>{const s=scorerOf(sg);return !s||String(s)===String(myId);};
+  const setTeam=(pid,team)=>save({...g,roster:g.roster.map(p=>p.id===pid?{...p,team}:p)});
+  const assignTeams=(assign)=>save({...g,roster:g.roster.map(p=>
+    assign[p.id]!==undefined?{...p,team:assign[p.id]}:p)});
+  const renameTeam=(i,name)=>save({...g,teamNames:g.teamNames.map((t,j)=>j===i?name:t)});
+  const [view,setView]=useState(g.done?"score":"briefing");
+
+  // --- édition scores : amicale (subgames) ou tournoi (rounds[].subgames) ---
+  const setScoreSimple=(sgId,pid,hole,v)=>save({...g,subgames:g.subgames.map(sg=>{
+    if(sg.id!==sgId) return sg;const sc={...sg.scores};sc[pid]={...(sc[pid]||{})};
+    sc[pid][hole]=v===""?undefined:Math.max(1,+v);return {...sg,scores:sc};})});
+  const setScoreRound=(rid,sgId,pid,hole,v)=>save({...g,rounds:g.rounds.map(r=>{
+    if(r.id!==rid) return r;return {...r,subgames:r.subgames.map(sg=>{
+      if(sg.id!==sgId) return sg;const sc={...sg.scores};sc[pid]={...(sc[pid]||{})};
+      sc[pid][hole]=v===""?undefined:Math.max(1,+v);return {...sg,scores:sc};})};})});
+  // validation d'un trou (toggle) → met à jour sg.validated
+  const toggleHoleSimple=(sgId,hole)=>save({...g,subgames:g.subgames.map(sg=>{
+    if(sg.id!==sgId) return sg;const v=sg.validated||[];
+    return {...sg,validated:v.includes(hole)?v.filter(x=>x!==hole):[...v,hole]};})});
+  const toggleHoleRound=(rid,sgId,hole)=>save({...g,rounds:g.rounds.map(r=>{
+    if(r.id!==rid) return r;return {...r,subgames:r.subgames.map(sg=>{
+      if(sg.id!==sgId) return sg;const v=sg.validated||[];
+      return {...sg,validated:v.includes(hole)?v.filter(x=>x!==hole):[...v,hole]};})};})});
+  const toggleDone=()=>{
+    const nd=!g.done;
+    if(isTournament) save({...g,done:nd,
+      rounds:g.rounds.map(r=>({...r,done:nd,subgames:r.subgames.map(s=>({...s,done:nd}))}))});
+    else save({...g,done:nd,subgames:g.subgames.map(s=>({...s,done:nd}))});
+  };
+
+  const refCourse=courses.find(c=>c.id===(isTournament?g.rounds[0]?.courseId:g.courseId));
+  return (
+    <div>
+      <button onClick={back} style={{...delBtn,marginBottom:8}}>← Retour</button>
+      <Section>{g.name}</Section>
+      <div style={{fontSize:12,color:T.dim,marginBottom:8}}>
+        {isTournament?`${g.rounds.length} manche(s)`:refCourse?.name} ·
+        {g.mode==="net"?" Net":" Brut"} · {g.roster?.length} joueurs</div>
+
+      <div style={{display:"flex",gap:8,marginBottom:12}}>
+        <Pill active={view==="briefing"} onClick={()=>setView("briefing")}>📋 Briefing</Pill>
+        <Pill active={view==="score"} onClick={()=>setView("score")}>✏️ Scores</Pill>
+      </div>
+
+      {view==="briefing" && <Briefing g={g} course={refCourse} playerById={playerById}
+        onStart={()=>setView("score")}/>}
+
+      {view==="score" && <>
+        {g.subtype==="ryder"&&<DrawHats g={g} onAssign={assignTeams}/>}
+        {(g.type==="event")&&<TeamManager g={g} renameTeam={renameTeam} setTeam={setTeam}/>}
+
+        {isTournament ? g.rounds.map(r=>{
+          const rc=courses.find(c=>c.id===r.courseId);
+          return (
+            <div key={r.id} style={{marginBottom:18}}>
+              <div style={{fontFamily:"Anton",fontSize:16,margin:"6px 0",
+                display:"flex",alignItems:"center",gap:8}}>
+                <span style={{background:T.gold,color:"#1a1200",borderRadius:6,
+                  padding:"2px 8px",fontSize:13}}>MANCHE {r.id}</span>
+                {rc?.name}</div>
+              {r.subgames.map((sg,si)=>(<div key={sg.id}>
+                {!g.done&&<ScorerPicker sg={sg} label={r.subgames.length>1?`Partie ${si+1}`:null}
+                  scorerId={scorerOf(sg)} canEdit={canEditSub(sg)} myId={myId}
+                  players={sg.players.map(playerById).filter(Boolean)}
+                  onPick={pid=>setScorerRound(r.id,sg.id,pid)} playerById={playerById}/>}
+                <SubGame sg={sg} course={rc} mode={g.mode} playerById={playerById}
+                  setScore={(sid,pid,h,v)=>setScoreRound(r.id,sid,pid,h,v)}
+                  validateHole={(sid,h)=>toggleHoleRound(r.id,sid,h)}
+                  done={g.done||!canEditSub(sg)}/>
+              </div>))}
+            </div>
+          );
+        }) : g.subgames.map((sg,si)=>(<div key={sg.id}>
+          {!g.done&&<ScorerPicker sg={sg} label={g.subgames.length>1?`Partie ${si+1}`:null}
+            scorerId={scorerOf(sg)} canEdit={canEditSub(sg)} myId={myId}
+            players={sg.players.map(playerById).filter(Boolean)}
+            onPick={pid=>setScorerSimple(sg.id,pid)} playerById={playerById}/>}
+          <SubGame sg={sg} course={refCourse} mode={g.mode}
+            playerById={playerById} setScore={setScoreSimple}
+            validateHole={toggleHoleSimple} done={g.done||!canEditSub(sg)}/>
+        </div>))}
+
+        <button onClick={toggleDone} style={{...addBtn,background:g.done?T.line:T.accent,
+          color:g.done?T.text:"#04150b"}}>
+          {g.done?"↩ Rouvrir":"✅ Valider (révéler résultats)"}</button>
+        {g.type==="event"&&g.done&&<EventBoard g={g} courses={courses} playerById={playerById}/>}
+        {g.done&&<ShareResults g={g} courses={courses} playerById={playerById}/>}
+      </>}
+    </div>
+  );
+}
+
+// Partage des résultats via WhatsApp / SMS / partage natif (gratuit, sans service tiers)
+function ShareResults({g,courses,playerById}){
+  const buildText=()=>{
+    const net=g.mode==="net";
+    const isTournament=!!g.rounds;
+    const kind=g.subtype==="ryder"?"🏆 Ryder Cup"
+      :isTournament?"🏆 Tournoi"
+      :"⛳ Partie amicale";
+    const D="—————————————";
+    let t=`${kind}\n${g.name}\n${net?"Net":"Brut"}\n${D}\n`;
+    const subs=g.rounds
+      ? g.rounds.flatMap(r=>r.subgames.map(sg=>({sg,c:courses.find(x=>x.id===r.courseId),rid:r.id})))
+      : g.subgames.map(sg=>({sg,c:courses.find(x=>x.id===g.courseId)}));
+    let curRound=null;
+    subs.forEach(({sg,c,rid})=>{
+      // en-tête de manche seulement s'il y a plusieurs manches (tournoi/ryder)
+      if(isTournament && rid!==curRound){
+        t+=`${curRound!==null?"\n":""}🚩 Manche ${rid} · ${c?.name}\n`;curRound=rid;
+      }
+      const ps=sg.players.map(playerById).filter(Boolean);
+      const r=computeSub(sg,ps,c,net);
+      if(r)t+=`   ${FORMULA_LABELS[sg.formula]}\n   → ${r.summary}\n`;
+      // coups rendus par joueur (si partie en net)
+      if(net && c){
+        const cr=ps.map(p=>{const td=teeData(c,p.tee);
+          const chp=courseHandicap(p.index,td.slope,td.cr,td.par);
+          return `${dispName(p)} ${chp}`;}).join(" · ");
+        t+=`   🎯 Coups rendus : ${cr}\n`;
+      }
+      t+=`\n`;
+    });
+    if(g.type==="event"){
+      let t0=0,t1=0;
+      subs.forEach(({sg,c})=>{const ps=sg.players.map(playerById).filter(Boolean);
+        const {pts}=playerScores(sg,ps,c,net);
+        Object.entries(pts).forEach(([id,pt])=>{const p=g.roster.find(x=>String(x.id)===String(id));
+          if(p?.team===0)t0+=pt;else if(p?.team===1)t1+=pt;});});
+      const [n0,n1]=g.teamNames||["Équipe 1","Équipe 2"];
+      const lead=t0>t1?`🏆 ${n0} l'emporte !`:t1>t0?`🏆 ${n1} l'emporte !`:"🤝 Égalité parfaite !";
+      t+=`${D}\n${n0}  ${t0} – ${t1}  ${n1}\n${lead}\n`;
+    }
+    t+=`${D}\n⛳ Du Golf & des Amis`;
+    return t.trim();
+  };
+  const share=async()=>{
+    const text=buildText();
+    if(navigator.share){try{await navigator.share({title:g.name,text});return;}catch(e){}}
+    // repli : ouvre WhatsApp avec le texte pré-rempli
+    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`,"_blank");
+  };
+  const waLink=DB.lget("waGroup","");
+  const toGroup=()=>{
+    // copie le résultat puis ouvre le groupe WhatsApp pour le coller
+    try{navigator.clipboard?.writeText(buildText());}catch(e){}
+    window.open(waLink,"_blank");
+  };
+  return (
+    <div style={{marginTop:14}}>
+      <button onClick={share} style={{...addBtn,background:"#25D366",color:"#062b14"}}>
+        💬 Partager les résultats sur WhatsApp</button>
+      {waLink&&<button onClick={toGroup} style={{...delBtn,width:"100%",marginTop:8,
+        padding:"12px",borderColor:"#25D366",color:"#25D366"}}>
+        📋 Copier & ouvrir le groupe du club</button>}
+      <div style={{fontSize:10,color:T.dim,marginTop:6,textAlign:"center"}}>
+        Le résultat est pré-rempli — tu choisis le contact ou le groupe, et tu envoies.
+        {waLink?" (Le 2e bouton copie le texte puis ouvre votre groupe : il ne reste qu'à coller.)":""}</div>
+    </div>
+  );
+}
+
+/* ===== VUE BRIEFING : récap coups rendus, slope/SSS, départs, trous rendus ===== */
+function Briefing({g,course,playerById,onStart}){
+  const net=g.mode==="net";
+  const rows=g.roster.map(p=>{
+    const t=teeData(course,p.tee);
+    const chp=courseHandicap(p.index,t.slope,t.cr,t.par);
+    const holes=net?strokeHoles(chp,course?.si):[];
+    return {p,t,chp,holes};
+  });
+  const minChp=Math.min(...rows.map(r=>r.chp));
+  return (
+    <div>
+      <div style={{...card(T.accent)}}>
+        <div style={{fontWeight:800,marginBottom:4}}>⛳ {course?.name}</div>
+        <div style={{fontSize:12,color:T.dim}}>
+          Par {course?.par} · {g.mode==="net"?"Jeu en NET (coups rendus)":"Jeu en BRUT"}</div>
+        <div style={{marginTop:8,fontSize:11,color:T.dim,fontWeight:700}}>DÉPARTS DU PARCOURS</div>
+        <div style={{display:"flex",flexWrap:"wrap",gap:6,marginTop:4}}>
+          {(course?.tees||[]).map(t=>(
+            <span key={t.name} style={{fontSize:11,padding:"3px 8px",borderRadius:6,
+              background:T.panel2,display:"flex",alignItems:"center",gap:5}}>
+              <span style={{width:9,height:9,borderRadius:2,background:teeDot(t.name)}}/>
+              {t.name} · SSS {t.cr} · Slope {t.slope}{t.length?` · ${t.length} m`:""}</span>))}
+        </div>
+      </div>
+
+      <Section>Coups rendus par joueur</Section>
+      {rows.map(({p,t,chp,holes})=>(
+        <div key={p.id} style={{...card(p.team===0?T.eu:p.team===1?T.us:T.line)}}>
+          <div style={{display:"flex",alignItems:"center",gap:8}}>
+            <span style={{width:12,height:12,borderRadius:3,background:teeDot(p.tee),
+              border:`1px solid ${T.line}`}}/>
+            <span style={{fontWeight:800,flex:1}}>{dispName(p)}</span>
+            <span style={{fontFamily:"Anton",fontSize:22,color:T.gold}}>{net?chp:0}</span>
+          </div>
+          <div style={{fontSize:11,color:T.dim,marginTop:4}}>
+            Index de jeu {p.index} · départ {p.tee}
+            {" "}(SSS {t.cr} · Slope {t.slope})</div>
+          {net && <div style={{marginTop:8}}>
+            <div style={{fontSize:11,color:T.dim,marginBottom:4}}>
+              {chp===minChp?"🟢 Joueur de référence (0 coup rendu relatif)":
+                `Reçoit ${chp} coup(s) sur :`}</div>
+            <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
+              {holes.map(h=>(<span key={h.hole} style={{fontSize:11,padding:"3px 7px",
+                borderRadius:6,background:T.panel2,fontWeight:700}}>
+                Trou {h.hole}{h.n>1?` ×${h.n}`:""}</span>))}
+              {holes.length===0 && <span style={{fontSize:11,color:T.dim}}>aucun</span>}
+            </div></div>}
+        </div>
+      ))}
+      <button onClick={onStart} style={{...addBtn,fontFamily:"'Archivo',sans-serif",fontSize:16,letterSpacing:.5}}>C'EST PARTI → SAISIR LES SCORES</button>
+    </div>
+  );
+}
+
+function TeamManager({g,renameTeam,setTeam}){
+  const [name0,setName0]=useState(g.teamNames?.[0]||"Équipe 1");
+  const [name1,setName1]=useState(g.teamNames?.[1]||"Équipe 2");
+  return (
+    <div style={{...card(T.gold),marginBottom:14}}>
+      <div style={{fontWeight:800,marginBottom:8}}>Équipes (renommables)</div>
+      <div style={{display:"flex",gap:8,marginBottom:10}}>
+        <input value={name0} onChange={e=>setName0(e.target.value)}
+          onBlur={()=>renameTeam(0,name0)} style={{...inp,borderColor:T.eu}}/>
+        <input value={name1} onChange={e=>setName1(e.target.value)}
+          onBlur={()=>renameTeam(1,name1)} style={{...inp,borderColor:T.us}}/>
+      </div>
+      {g.roster.map(p=>(
+        <div key={p.id} style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
+          <span style={{width:9,height:9,borderRadius:2,background:teeDot(p.tee),flexShrink:0}}/>
+          <span style={{flex:1,fontSize:13,fontWeight:700}}>{dispName(p)}
+            <span style={{color:T.dim,fontWeight:400}}> · {p.tee}</span>
+            {p.team==null&&<span style={{color:T.gold,fontWeight:400,fontSize:10}}> · neutre</span>}</span>
+          <button onClick={()=>setTeam(p.id,p.team===0?null:0)} style={{...miniBtn,
+            background:p.team===0?T.eu:T.panel,borderColor:T.eu}}>{name0}</button>
+          <button onClick={()=>setTeam(p.id,p.team===1?null:1)} style={{...miniBtn,
+            background:p.team===1?T.us:T.panel,borderColor:T.us}}>{name1}</button>
+        </div>))}
+      <div style={{fontSize:11,color:T.dim,marginTop:4}}>
+        {g.subtype==="ryder"?"Lance le tirage ci-dessus, ou tape pour affecter à la main. ":
+          "Tape pour affecter / désaffecter. "}Non affectés = neutres.</div>
+    </div>
+  );
+}
+
+function SubGame({sg,course,mode,playerById,setScore,validateHole,done}){
+  const ps=sg.players.map(playerById).filter(Boolean);
+  const net=mode==="net";
+  const result=useMemo(()=>computeSub(sg,ps,course,net),[sg,ps,course,net]);
+  const pars=holePars(course);
+  const validated=sg.validated||[];
+  const isValid=h=>validated.includes(h);
+  const [pad,setPad]=useState(null); // {pid,hole} cellule en cours de saisie
+  const [showGrid,setShowGrid]=useState(false); // grille complète dépliée
+  const [curHole,setCurHole]=useState(()=>{ // 1er trou non validé
+    for(let i=0;i<18;i++) if(!(sg.validated||[]).includes(i)) return i; return 0;});
+  const strokesByPlayer={};
+  ps.forEach(p=>{const t=teeData(course,p.tee);
+    const chp=courseHandicap(p.index,t.slope,t.cr,t.par);
+    strokesByPlayer[p.id]=net?strokesPerHole(chp,course?.si):new Array(18).fill(0);});
+  const allScored=h=>ps.every(p=>sg.scores?.[p.id]?.[h]!=null);
+  const padPlayer=pad?ps.find(p=>p.id===pad.pid):null;
+  const enter=(n)=>{ if(!pad) return; setScore(sg.id,pad.pid,pad.hole,String(n));
+    setPad(null); // referme : le pavé se replacera au prochain clic, pile sur la case
+  };
+  const siOf=h=>(course?.si&&course.si.length===18)?course.si[h]:h+1;
+
+  // ===== VUE TROU PAR TROU (par défaut) =====
+  if(!showGrid && !done){
+    const h=curHole, v=isValid(h);
+    return (
+      <div style={{...card(T.eu),marginBottom:14}}>
+        <div style={{fontWeight:800,marginBottom:8}}>{FORMULA_LABELS[sg.formula]} ·
+          {" "}{ps.map(p=>dispName(p)).join(" / ")}</div>
+
+        {/* navigation trou */}
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",
+          marginBottom:10}}>
+          <button onClick={()=>{setCurHole(Math.max(0,h-1));setPad(null);}}
+            disabled={h===0} style={{...miniBtn,padding:"8px 14px",opacity:h===0?.4:1}}>◀</button>
+          <div style={{textAlign:"center"}}>
+            <div style={{fontFamily:"Anton",fontSize:26,lineHeight:1}}>Trou {h+1}</div>
+            <div style={{fontSize:11,color:T.dim,marginTop:2}}>
+              Par {pars[h]} · HCP {siOf(h)} {v&&<span style={{color:T.accent}}>· ✓ validé</span>}</div>
+          </div>
+          <button onClick={()=>{setCurHole(Math.min(17,h+1));setPad(null);}}
+            disabled={h===17} style={{...miniBtn,padding:"8px 14px",opacity:h===17?.4:1}}>▶</button>
+        </div>
+
+        {/* lignes joueurs : nom + case score */}
+        {ps.map(p=>{
+          const recv=strokesByPlayer[p.id][h]>0;
+          const val=sg.scores?.[p.id]?.[h];
+          const vsPar=val!=null?val-pars[h]:null;
+          const active=pad&&pad.pid===p.id&&pad.hole===h;
+          return (
+            <div key={p.id} style={{display:"flex",alignItems:"center",gap:10,
+              padding:"8px 10px",marginBottom:6,borderRadius:12,
+              background:active?`${T.accent}14`:T.panel,
+              border:`1.5px solid ${active?T.accent:T.line}`}}>
+              <span style={{width:9,height:9,borderRadius:2,background:teeDot(p.tee),flexShrink:0}}/>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontWeight:700,fontSize:14}}>{dispName(p)}
+                  {recv&&<span style={{color:"#3a7bd5",fontSize:11}}> ●{strokesByPlayer[p.id][h]>1?strokesByPlayer[p.id][h]:""} coup rendu</span>}</div>
+                <div style={{fontSize:10,color:T.dim}}>CHP {net?courseHandicap(p.index,teeData(course,p.tee).slope,teeData(course,p.tee).cr,teeData(course,p.tee).par):0}</div>
+              </div>
+              <button disabled={v} onClick={(e)=>{
+                  if(active){setPad(null);return;}
+                  const r=e.currentTarget.getBoundingClientRect();
+                  setPad({pid:p.id,hole:h,x:r.left+r.width/2,y:r.bottom});
+                }}
+                style={{width:54,height:54,borderRadius:14,fontSize:22,fontWeight:800,
+                  fontFamily:"Anton",cursor:v?"default":"pointer",
+                  border:`2px solid ${active?T.accent:val!=null?(vsPar<0?T.accent:vsPar>0?"#ff9b9b":T.line):T.line}`,
+                  background:active?`${T.accent}22`:"#0c130e",opacity:v?.6:1,
+                  color:vsPar<0?"#7be0a0":vsPar>0?"#ff9b9b":T.text}}>{val??"–"}</button>
+            </div>
+          );
+        })}
+
+        {/* pavé 1→9 FLOTTANT, pile près du doigt, recalé dans l'écran */}
+        {pad && padPlayer && pad.hole===h && (()=>{
+          const PADW=232, PADH=168, M=8;
+          const vw=typeof window!=="undefined"?window.innerWidth:380;
+          const vh=typeof window!=="undefined"?window.innerHeight:700;
+          let left=(pad.x||vw/2)-PADW/2;
+          left=Math.max(M,Math.min(left,vw-PADW-M));
+          let top=(pad.y||vh/2)+8;                    // sous la case par défaut
+          if(top+PADH>vh-M) top=Math.max(M,(pad.y||vh/2)-PADH-60); // sinon au-dessus
+          return (<>
+            <div onClick={()=>setPad(null)} style={{position:"fixed",inset:0,zIndex:40}}/>
+            <div style={{position:"fixed",left,top,width:PADW,zIndex:41,
+              background:T.panel2,borderRadius:14,padding:12,
+              border:`1.5px solid ${T.accent}`,boxShadow:"0 10px 30px rgba(0,0,0,.5)"}}>
+              <div style={{fontSize:11,color:T.dim,marginBottom:8,textAlign:"center"}}>
+                <b style={{color:T.text}}>{dispName(padPlayer)}</b> · trou {h+1} (par {pars[h]})</div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:6}}>
+                {[1,2,3,4,5,6,7,8,9].map(n=>{const diff=n-pars[h];
+                  const col=diff<0?T.accent:diff===0?T.text:diff===1?T.gold:"#ff9b9b";
+                  return (<button key={n} onClick={()=>enter(n)} style={{padding:"12px 0",
+                    borderRadius:10,border:`1.5px solid ${col}55`,background:`${col}1a`,color:col,
+                    fontSize:17,fontWeight:800,fontFamily:"Anton",cursor:"pointer"}}>{n}</button>);})}
+                <button onClick={()=>setPad(null)} style={{padding:"12px 0",borderRadius:10,
+                  border:`1.5px solid ${T.line}`,background:"transparent",color:T.dim,
+                  fontSize:12,fontWeight:800,cursor:"pointer"}}>✕</button>
+              </div>
+            </div>
+          </>);
+        })()}
+
+        {/* bouton valider le trou */}
+        <button onClick={()=>{validateHole(sg.id,h); if(!v&&h<17){setCurHole(h+1);setPad(null);}}}
+          disabled={!v&&!allScored(h)}
+          style={{...addBtn,marginTop:12,
+            background:v?T.gold:allScored(h)?T.accent:T.line,
+            color:v?"#1a1200":allScored(h)?T.ink:T.dim}}>
+          {v?"🔒 Rouvrir ce trou":"✓ Valider le trou"+(h<17?" et passer au suivant":"")}</button>
+
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",
+          marginTop:10,fontSize:11,color:T.dim}}>
+          <span>{validated.length}/18 trous validés</span>
+          <button onClick={()=>setShowGrid(true)} style={{...miniBtn,fontSize:11}}>
+            📋 Voir la grille complète</button>
+        </div>
+
+        <LiveBoard sg={sg} ps={ps} course={course} net={net} result={result}/>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{...card(T.eu),marginBottom:14}}>
+      <div style={{fontWeight:800,marginBottom:6}}>{FORMULA_LABELS[sg.formula]} ·
+        {" "}{ps.map(p=>dispName(p)).join(" / ")}</div>
+      {!done && <button onClick={()=>setShowGrid(false)} style={{...miniBtn,marginBottom:8}}>
+        ← Revenir à la saisie trou par trou</button>}
+      <div style={{fontSize:10,color:T.dim,marginBottom:4}}>
+        Tape une case → choisis le score · 🔵 coup rendu · HCP = difficulté · ✓ valide · 🔒 rouvrir</div>
+      {(()=>{
+        const Block=({from,to,label})=>(
+          <div style={{marginBottom:14}}>
+            <div style={{fontSize:10,color:T.dim,fontWeight:700,marginBottom:4,
+              textTransform:"uppercase",letterSpacing:.5}}>{label}</div>
+            <table style={{borderCollapse:"collapse",fontSize:11,width:"100%",tableLayout:"fixed"}}>
+              <thead>
+                <tr><th style={{...th,width:"15%",textAlign:"left"}}>Tr</th>
+                  {Array.from({length:to-from},(_,k)=>{const i=from+k;const v=isValid(i);
+                    return (<th key={i} style={{...th,background:v?"#143d28":"transparent",
+                      color:v?T.accent:T.dim,borderRadius:4}}>{i+1}{v&&"✓"}</th>);})}
+                  <th style={{...th,color:T.gold}}>T</th></tr>
+                <tr><td style={{...td,color:T.dim,fontSize:9,fontWeight:700,textAlign:"left"}}>HCP</td>
+                  {Array.from({length:to-from},(_,k)=>{const i=from+k;const si=siOf(i);
+                    return <td key={i} style={{...td,color:si<=6?"#ff9b9b":si<=12?T.gold:T.dim,
+                      fontSize:9,fontWeight:700}}>{si}</td>;})}
+                  <td style={td}></td></tr>
+                <tr><td style={{...td,color:T.dim,fontSize:9,textAlign:"left"}}>Par</td>
+                  {Array.from({length:to-from},(_,k)=>{const i=from+k;
+                    return <td key={i} style={{...td,color:T.dim,fontSize:9}}>{pars[i]}</td>;})}
+                  <td style={{...td,fontSize:9,color:T.dim}}>
+                    {pars.slice(from,to).reduce((a,b)=>a+b,0)}</td></tr>
+              </thead>
+              <tbody>{ps.map(p=>{
+                const t=teeData(course,p.tee);const chp=courseHandicap(p.index,t.slope,t.cr,t.par);
+                const sub=Array.from({length:to-from},(_,k)=>sg.scores?.[p.id]?.[from+k])
+                  .reduce((a,b)=>a+(b||0),0);
+                return (<tr key={p.id}>
+                  <td style={{...td,fontWeight:700,whiteSpace:"nowrap",textAlign:"left",fontSize:10}}>
+                    <span style={{display:"inline-block",width:7,height:7,borderRadius:2,
+                      background:teeDot(p.tee),marginRight:3}}/>{dispName(p)}</td>
+                  {Array.from({length:to-from},(_,k)=>{const i=from+k;
+                    const recv=strokesByPlayer[p.id][i]>0;const v=isValid(i);
+                    const val=sg.scores?.[p.id]?.[i];const vsPar=val!=null?val-pars[i]:null;
+                    const active=pad&&pad.pid===p.id&&pad.hole===i;
+                    return (<td key={i} style={{...td,position:"relative",padding:"2px 1px",
+                      background:v?"#10311f":"transparent"}}>
+                      <button disabled={v||done} onClick={(e)=>{
+                          if(active){setPad(null);return;}
+                          const r=e.currentTarget.getBoundingClientRect();
+                          setPad({pid:p.id,hole:i,x:r.left+r.width/2,y:r.bottom});}}
+                        style={{...cell,width:"100%",cursor:(v||done)?"default":"pointer",
+                          borderColor:active?T.accent:recv?"#3a7bd5":T.line,
+                          borderWidth:active?2:1.5,opacity:v?.6:1,
+                          background:active?`${T.accent}22`:"#0c130e",
+                          color:vsPar<0?"#7be0a0":vsPar>0?"#ff9b9b":T.text}}>{val??""}</button>
+                      {recv&&<span style={{position:"absolute",top:0,right:1,width:4,height:4,
+                        borderRadius:"50%",background:"#3a7bd5"}}/>}
+                    </td>);})}
+                  <td style={{...td,fontWeight:800,color:T.gold}}>{sub||"-"}</td></tr>);
+              })}</tbody>
+              {!done && <tfoot>
+                <tr><td style={{...td,color:T.dim,fontSize:8,textAlign:"left"}}>OK</td>
+                  {Array.from({length:to-from},(_,k)=>{const i=from+k;
+                    const v=isValid(i),ok=allScored(i);
+                    return (<td key={i} style={{...td,padding:"3px 1px"}}>
+                      <button onClick={()=>validateHole(sg.id,i)} disabled={!v&&!ok}
+                        style={{width:"100%",padding:"3px 0",borderRadius:5,
+                          cursor:(v||ok)?"pointer":"default",border:"none",fontSize:10,fontWeight:800,
+                          background:v?T.gold:ok?T.accent:"#1a2620",
+                          color:v?"#1a1200":ok?T.ink:T.dim}}>{v?"🔒":"✓"}</button></td>);})}
+                  <td style={td}></td></tr>
+              </tfoot>}
+            </table>
+          </div>
+        );
+        return (<><Block from={0} to={9} label="Aller · trous 1 à 9"/>
+          <Block from={9} to={18} label="Retour · trous 10 à 18"/></>);
+      })()}
+
+      {/* pavé flottant 1→9 (mode grille) */}
+      {pad && padPlayer && (()=>{
+        const PADW=232,PADH=168,M=8;
+        const vw=typeof window!=="undefined"?window.innerWidth:380;
+        const vh=typeof window!=="undefined"?window.innerHeight:700;
+        let left=(pad.x||vw/2)-PADW/2; left=Math.max(M,Math.min(left,vw-PADW-M));
+        let top=(pad.y||vh/2)+8; if(top+PADH>vh-M) top=Math.max(M,(pad.y||vh/2)-PADH-50);
+        return (<>
+          <div onClick={()=>setPad(null)} style={{position:"fixed",inset:0,zIndex:40}}/>
+          <div style={{position:"fixed",left,top,width:PADW,zIndex:41,background:T.panel2,
+            borderRadius:14,padding:12,border:`1.5px solid ${T.accent}`,
+            boxShadow:"0 10px 30px rgba(0,0,0,.5)"}}>
+            <div style={{fontSize:11,color:T.dim,marginBottom:8,textAlign:"center"}}>
+              <b style={{color:T.text}}>{dispName(padPlayer)}</b> · trou {pad.hole+1} (par {pars[pad.hole]})</div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:6}}>
+              {[1,2,3,4,5,6,7,8,9].map(n=>{const diff=n-pars[pad.hole];
+                const col=diff<0?T.accent:diff===0?T.text:diff===1?T.gold:"#ff9b9b";
+                return (<button key={n} onClick={()=>enter(n)} style={{padding:"12px 0",
+                  borderRadius:10,border:`1.5px solid ${col}55`,background:`${col}1a`,color:col,
+                  fontSize:17,fontWeight:800,fontFamily:"Anton",cursor:"pointer"}}>{n}</button>);})}
+              <button onClick={()=>setPad(null)} style={{padding:"12px 0",borderRadius:10,
+                border:`1.5px solid ${T.line}`,background:"transparent",color:T.dim,
+                fontSize:12,fontWeight:800,cursor:"pointer"}}>✕</button>
+            </div>
+          </div>
+        </>);
+      })()}
+
+      <div style={{fontSize:11,color:T.dim,marginTop:8}}>
+        {validated.length}/18 trous validés · le classement live ne compte que les trous validés</div>
+      {/* TABLEAU RÉSULTATS LIVE */}
+      <LiveBoard sg={sg} ps={ps} course={course} net={net} result={result}/>
+      {done&&result&&<div style={{marginTop:8,padding:"8px 10px",background:T.panel2,
+        borderRadius:8,fontSize:13}}>🏁 Final : {result.summary}</div>}
+    </div>
+  );
+}
+
+/* ===== Tableau de résultats live, visuel, sous la saisie ===== */
+function stablefordBrut(sg,p,course,validated){
+  // barème brut : eagle+ 4 / birdie 3 / par 2 / bogey 1 / double+ 0
+  const pars=holePars(course);let pts=0;
+  validated.forEach(h=>{const g=sg.scores?.[p.id]?.[h];if(g==null)return;
+    const d=g-pars[h]; // vs par (brut)
+    pts+=d<=-2?4:d===-1?3:d===0?2:d===1?1:0;});
+  return pts;
+}
+function LiveBoard({sg,ps,course,net,result}){
+  const validated=(sg.validated||[]).slice().sort((a,b)=>a-b);
+  const f=sg.formula;
+  const sgV=useMemo(()=>{
+    const scores={};ps.forEach(p=>{scores[p.id]={};
+      validated.forEach(h=>{const v=sg.scores?.[p.id]?.[h];if(v!=null)scores[p.id][h]=v;});});
+    return {...sg,scores};
+  },[sg,validated.join(",")]);// eslint-disable-line
+  const rV=useMemo(()=>computeSub(sgV,ps,course,net),[sgV,ps,course,net]);
+
+  const teamFormats=["fourball","foursome","mexicaine","scramble","matchplay2v2"];
+  const isTeam2v2=teamFormats.includes(f) && ps.length===4;
+  const anyValid=validated.length>0;
+
+  // ===== Affichage spécial 2v2 : score d'équipe en évidence + Stableford brut individuel =====
+  if(isTeam2v2){
+    const a=ps.slice(0,2),b=ps.slice(2,4);
+    const nameA=a.map(dispName).join(" / "),nameB=b.map(dispName).join(" / ");
+    // joueurs triés par Stableford brut décroissant (informatif)
+    const indiv=ps.map(p=>({p,team:a.includes(p)?0:1,
+      stb:stablefordBrut(sg,p,course,validated)})).sort((x,y)=>y.stb-x.stb);
+    const winA=rV?.winner===nameA, winB=rV?.winner===nameB;
+    return (
+      <div style={{marginTop:12,background:`linear-gradient(180deg,${T.panel2},${T.panel})`,
+        borderRadius:12,padding:12,border:`1px solid ${T.line}`}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+          <span style={{fontFamily:"Anton",fontSize:14,letterSpacing:.5}}>📊 RÉSULTATS LIVE</span>
+          <span style={{fontSize:10,color:T.dim}}>{validated.length} tr. validés</span></div>
+        {!anyValid && <div style={{fontSize:12,color:T.dim,textAlign:"center",padding:"8px 0"}}>
+          Valide des trous (bouton ✓) pour voir le résultat d'équipe…</div>}
+        {/* SCORE D'ÉQUIPE EN ÉVIDENCE */}
+        {anyValid && <div style={{display:"flex",gap:10,marginBottom:12}}>
+          {[{n:nameA,win:winA,c:T.eu},{n:nameB,win:winB,c:T.us}].map((t,i)=>(
+            <div key={i} style={{flex:1,borderRadius:14,padding:"14px 10px",textAlign:"center",
+              border:`2px solid ${t.win?T.gold:t.c+"55"}`,
+              background:t.win?`${T.gold}1a`:`${t.c}14`}}>
+              <div style={{fontSize:12,fontWeight:800,color:t.win?T.gold:T.text}}>
+                {t.win&&"🏆 "}{t.n}</div></div>))}
+        </div>}
+        {anyValid && <div style={{textAlign:"center",fontFamily:"Anton",fontSize:18,
+          color:T.gold,marginBottom:12}}>{rV?.summary}</div>}
+        {/* STABLEFORD BRUT INDIVIDUEL (secondaire) */}
+        {anyValid && <div style={{borderTop:`1px solid ${T.line}`,paddingTop:8}}>
+          <div style={{fontSize:10,color:T.dim,marginBottom:6,textTransform:"uppercase",
+            letterSpacing:.5,fontWeight:700}}>Stableford brut individuel</div>
+          {indiv.map((r,i)=>(
+            <div key={r.p.id} style={{display:"flex",justifyContent:"space-between",
+              alignItems:"center",fontSize:12,marginBottom:4}}>
+              <span style={{color:T.dim}}>
+                <span style={{display:"inline-block",width:7,height:7,borderRadius:2,
+                  background:r.team===0?T.eu:T.us,marginRight:6}}/>
+                {dispName(r.p)}</span>
+              <span style={{fontWeight:800,color:T.text}}>{r.stb} <span style={{fontSize:9,color:T.dim}}>pts</span></span>
+            </div>))}
+        </div>}
+      </div>
+    );
+  }
+
+  // formules à POINTS par joueur : on lit les points calculés
+  const pointFormulas=["chouette","onevonevone","stableford","stableford_net","stableford_gross","skins"];
+  const isPoints=pointFormulas.includes(f);
+  const isTeam=["matchplay","strokeplay_net"].includes(f);
+
+  // construit les lignes selon le type de formule
+  let rows=[];
+  if(isPoints){
+    const pmap=rV?.pts||{};
+    // si pas de pts (stableford/skins renvoient un summary), on reparse depuis le résumé impossible :
+    // on recalcule les points simples ici pour stableford/skins
+    if(Object.keys(pmap).length){
+      rows=ps.map(p=>({p,val:pmap[p.id]||0}));
+    } else {
+      // stableford / skins : recompute points par joueur sur trous validés
+      rows=ps.map(p=>{
+        const t=teeData(course,p.tee);const chp=courseHandicap(p.index,t.slope,t.cr,t.par);
+        const useNet=f==="stableford_gross"?false:net;
+        const strokes=useNet?strokesPerHole(chp,course?.si):new Array(18).fill(0);
+        let pts=0;
+        validated.forEach(h=>{const g=sg.scores?.[p.id]?.[h];if(g==null)return;
+          const s=g-strokes[h];pts+=Math.max(0,2+(holePars(course)[h]-s));});
+        return {p,val:pts};
+      });
+    }
+    rows=rows.filter(r=>r.val!=null).sort((a,b)=>b.val-a.val); // plus de points = mieux
+  } else {
+    // coups nets (stroke/match) : plus petit = mieux
+    rows=ps.map(p=>{
+      const t=teeData(course,p.tee);const chp=courseHandicap(p.index,t.slope,t.cr,t.par);
+      const strokes=net?strokesPerHole(chp,course?.si):new Array(18).fill(0);
+      let netTot=0,played=0;
+      validated.forEach(h=>{const s=sg.scores?.[p.id]?.[h];if(s==null)return;played++;netTot+=s-strokes[h];});
+      return {p,val:netTot,played};
+    }).filter(r=>r.played>0).sort((a,b)=>a.val-b.val);
+  }
+  const anyScore=validated.length>0 && rows.length>0;
+  const vals=rows.map(r=>r.val);
+  const best=vals.length?(isPoints?Math.max(...vals):Math.min(...vals)):0;
+  const worst=vals.length?(isPoints?Math.min(...vals):Math.max(...vals)):1;
+  const span=Math.max(1,Math.abs(worst-best));
+  const unit=isPoints?"pts":(net?"net":"brut");
+
+  return (
+    <div style={{marginTop:12,background:`linear-gradient(180deg,${T.panel2},${T.panel})`,
+      borderRadius:12,padding:12,border:`1px solid ${T.line}`}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",
+        marginBottom:10}}>
+        <span style={{fontFamily:"Anton",fontSize:14,letterSpacing:.5}}>📊 RÉSULTATS LIVE</span>
+        <span style={{fontSize:10,color:T.dim}}>{unit.toUpperCase()} · {validated.length} tr. validés</span></div>
+      {!anyScore && <div style={{fontSize:12,color:T.dim,textAlign:"center",padding:"8px 0"}}>
+        Valide des trous (bouton ✓) pour voir le classement s'animer…</div>}
+      {rows.map((r,i)=>{
+        const pct=isPoints
+          ? 30+((r.val-worst)/span)*70
+          : 100-((r.val-best)/span)*70;
+        const isLeader=i===0;
+        return (
+          <div key={r.p.id} style={{marginBottom:8}}>
+            <div style={{display:"flex",justifyContent:"space-between",fontSize:12,
+              marginBottom:3}}>
+              <span style={{fontWeight:800,color:isLeader?T.gold:T.text}}>
+                {i+1}. {dispName(r.p)} {isLeader&&"👑"}</span>
+              <span style={{fontFamily:"Anton",fontSize:16,
+                color:isLeader?T.gold:T.accent}}>{r.val}{isPoints?<span style={{fontSize:9,color:T.dim}}> pts</span>:""}</span></div>
+            <div style={{height:8,borderRadius:999,background:T.bg,overflow:"hidden"}}>
+              <div style={{width:`${Math.max(12,pct)}%`,height:"100%",borderRadius:999,
+                background:isLeader?`linear-gradient(90deg,${T.gold},#b8860b)`:
+                `linear-gradient(90deg,${T.accent},${T.eu})`,transition:"width .5s ease"}}/>
+            </div>
+          </div>
+        );
+      })}
+      {(isTeam&&rV)&&<div style={{marginTop:4,fontSize:13,fontWeight:700,
+        textAlign:"center",color:T.gold}}>{rV.summary}</div>}
+      {rV&&anyScore&&!isTeam&&<div style={{marginTop:8,fontSize:12,color:T.dim,
+        borderTop:`1px solid ${T.line}`,paddingTop:8}}>
+        ⚡ {rV.summary}</div>}
+    </div>
+  );
+}
+
+/* ===== Tirage 3 chapeaux (Ryder Cup) : équilibré par index, animé ===== */
+function DrawHats({g,onAssign}){
+  const [spinning,setSpinning]=useState(false);
+  const [result,setResult]=useState(null);
+  const draw=()=>{
+    setSpinning(true);setResult(null);
+    setTimeout(()=>{
+      const sorted=[...g.roster].sort((a,b)=>a.index-b.index);
+      const per=Math.ceil(sorted.length/3);
+      const hats=[sorted.slice(0,per),sorted.slice(per,per*2),sorted.slice(per*2)];
+      const e0=[],e1=[];
+      hats.forEach(hat=>{const sh=[...hat].sort(()=>Math.random()-.5);
+        sh.forEach((p,i)=>(i%2===0?e0:e1).push(p));});
+      const assign={};e0.forEach(p=>assign[p.id]=0);e1.forEach(p=>assign[p.id]=1);
+      setResult({hats,e0,e1});setSpinning(false);
+      onAssign(assign);
+    },1100);
+  };
+  const [n0,n1]=g.teamNames||["Équipe 1","Équipe 2"];
+  return (
+    <div style={{...card(T.us),marginBottom:14}}>
+      <div style={{fontWeight:800,marginBottom:4}}>🎩 Tirage au sort · 3 chapeaux</div>
+      <div style={{fontSize:11,color:T.dim,marginBottom:8}}>
+        Joueurs triés par index → 3 chapeaux (forts / moyens / hauts index) → répartition
+        équilibrée dans les deux équipes.</div>
+      <button onClick={draw} disabled={spinning} style={{...addBtn,marginTop:0,
+        background:spinning?T.line:`linear-gradient(90deg,${T.eu},${T.us})`,color:"#fff",
+        fontFamily:"'Archivo',sans-serif",letterSpacing:.5,fontSize:16}}>
+        {spinning?<span><span style={{display:"inline-block",animation:"spin .7s linear infinite"}}>🎩</span> Tirage…</span>
+          :"🎩 LANCER LE TIRAGE"}</button>
+      {result&&<div style={{marginTop:12}}>
+        {result.hats.map((hat,i)=>(
+          <div key={i} style={{...card(T.gold),animation:`pop .4s ${i*.12}s both`,padding:"8px 10px"}}>
+            <div style={{fontWeight:800,fontSize:12}}>Chapeau {i+1}
+              <span style={{color:T.dim,fontWeight:400}}> {i===0?"(plus forts)":i===2?"(hauts index)":"(moyens)"}</span></div>
+            <div style={{fontSize:12,marginTop:2}}>{hat.map(p=>`${dispName(p)} (${p.index})`).join(" · ")}</div>
+          </div>))}
+        <div style={{display:"flex",gap:10,marginTop:8}}>
+          <div style={{flex:1,background:T.eu,borderRadius:10,padding:10,animation:"pop .5s .4s both"}}>
+            <div style={{fontFamily:"Anton",fontSize:15}}>{n0}</div>
+            {result.e0.map(p=><div key={p.id} style={{fontSize:12,marginTop:2}}>{dispName(p)}</div>)}</div>
+          <div style={{flex:1,background:T.us,borderRadius:10,padding:10,animation:"pop .5s .55s both"}}>
+            <div style={{fontFamily:"Anton",fontSize:15}}>{n1}</div>
+            {result.e1.map(p=><div key={p.id} style={{fontSize:12,marginTop:2}}>{dispName(p)}</div>)}</div>
+        </div>
+        <div style={{fontSize:11,color:T.dim,marginTop:6}}>
+          Équipes appliquées ✅ — tu peux encore ajuster ci-dessous.</div>
+      </div>}
+    </div>
+  );
+}
+
+function EventBoard({g,courses,playerById}){
+  const net=g.mode==="net";let t0=0,t1=0;
+  const allSubs=g.rounds
+    ? g.rounds.flatMap(r=>r.subgames.map(sg=>({sg,course:courses.find(c=>c.id===r.courseId)})))
+    : g.subgames.map(sg=>({sg,course:courses.find(c=>c.id===g.courseId)}));
+  allSubs.forEach(({sg,course})=>{
+    const ps=sg.players.map(playerById).filter(Boolean);
+    const {pts}=playerScores(sg,ps,course,net);
+    // chaque joueur apporte ses points (2/1/0) à son équipe
+    Object.entries(pts).forEach(([id,pt])=>{
+      const p=g.roster.find(x=>String(x.id)===String(id));
+      if(p?.team===0)t0+=pt;else if(p?.team===1)t1+=pt;});
+  });
+  const [n0,n1]=g.teamNames||["Équipe 1","Équipe 2"];
+  const lead=t0>t1?n0:t1>t0?n1:"Égalité";
+  return (
+    <div style={{...card(T.gold),marginTop:14,textAlign:"center"}}>
+      <div style={{fontFamily:"Anton",fontSize:16,marginBottom:4}}>CLASSEMENT TOURNOI</div>
+      <div style={{fontSize:11,color:T.dim,marginBottom:8}}>
+        Cumul sur {g.rounds?`${g.rounds.length} manche(s)`:"la partie"} · points 2/1/0</div>
+      <div style={{display:"flex",justifyContent:"space-around",fontWeight:800}}>
+        <div><div style={{color:"#6db1ff"}}>{n0}</div>
+          <div style={{fontFamily:"Anton",fontSize:32,color:t0>=t1?T.gold:T.text}}>{t0}</div></div>
+        <div><div style={{color:"#ff8a8a"}}>{n1}</div>
+          <div style={{fontFamily:"Anton",fontSize:32,color:t1>=t0?T.gold:T.text}}>{t1}</div></div>
+      </div>
+      <div style={{marginTop:8,fontSize:13,fontWeight:800,color:T.accent}}>
+        {lead==="Égalité"?"Égalité parfaite !":`🏆 ${lead} mène`}</div>
+    </div>
+  );
+}
+
+function computeSub(sg,ps,course,net){
+  if(!course||!ps.length) return null;
+  const holes=(useNet)=>p=>{const t=teeData(course,p.tee);
+    const chp=courseHandicap(p.index,t.slope,t.cr,t.par);
+    const strokes=strokesPerHole(chp,course.si);
+    return Array.from({length:18},(_,i)=>{const g=sg.scores?.[p.id]?.[i];
+      if(g==null) return null;return useNet?g-strokes[i]:g;});};
+  const f=sg.formula;
+  // Stableford a ses propres variantes brut/net indépendantes du mode partie
+  const useNet = f==="stableford_net" ? true : f==="stableford_gross" ? false : net;
+  const holeNet=holes(useNet);
+  const nets={};ps.forEach(p=>nets[p.id]=holeNet(p));
+  if(f==="onevonevone"){
+    const pts={};ps.forEach(p=>pts[p.id]=0);
+    for(let h=0;h<18;h++){const vals=ps.map(p=>({id:p.id,s:nets[p.id][h]})).filter(x=>x.s!=null);
+      if(vals.length<ps.length) continue;
+      const min=Math.min(...vals.map(v=>v.s));
+      const w=vals.filter(v=>v.s===min);w.forEach(v=>pts[v.id]+=1/w.length);}
+    const rank=ps.map(p=>({name:dispName(p),pts:Math.round(pts[p.id]*10)/10})).sort((x,y)=>y.pts-x.pts);
+    return {pts,summary:rank.map(r=>`${r.name} ${r.pts}`).join(" · "),winner:rank[0]?.name};
+  }
+  if(f==="chouette"){
+    // 6 pts/trou. Chaque joueur a UN seul score net = brut - ses coups rendus (CHP réparti
+    // par stroke index, comme partout). On classe les 3 nets et on distribue 6 points.
+    const pts={};ps.forEach(p=>pts[p.id]=0);
+    for(let h=0;h<18;h++){
+      const trio=ps.map(p=>({id:p.id,s:nets[p.id][h]}));
+      if(trio.some(x=>x.s==null)) continue;
+      const sorted=[...trio].sort((a,b)=>a.s-b.s);
+      const [a,b,c]=sorted; // a meilleur net (plus petit), c le pire
+      if(a.s<b.s && b.s<c.s){            // 3 nets distincts
+        pts[a.id]+=4; pts[b.id]+=2; pts[c.id]+=0;
+      } else if(a.s===b.s && b.s===c.s){ // les 3 égaux
+        pts[a.id]+=2; pts[b.id]+=2; pts[c.id]+=2;
+      } else if(a.s===b.s && b.s<c.s){   // égalité en tête
+        pts[a.id]+=3; pts[b.id]+=3; pts[c.id]+=0;
+      } else if(a.s<b.s && b.s===c.s){   // gagnant seul + égalité 2e/3e
+        pts[a.id]+=4; pts[b.id]+=1; pts[c.id]+=1;
+      }
+    }
+    const rank=ps.map(p=>({name:dispName(p),pts:pts[p.id]})).sort((x,y)=>y.pts-x.pts);
+    return {pts,summary:rank.map(r=>`${r.name} ${r.pts}`).join(" · "),winner:rank[0]?.name};
+  }
+  if(f==="matchplay"||f==="matchplay2v2"){
+    const a=f==="matchplay"?[ps[0]]:ps.slice(0,2);
+    const b=f==="matchplay"?[ps[1]]:ps.slice(2,4);
+    const th_=(team,h)=>{const v=team.map(p=>nets[p.id][h]).filter(x=>x!=null);
+      return v.length?Math.min(...v):null;};
+    let win=0;for(let h=0;h<18;h++){const e=th_(a,h),u=th_(b,h);
+      if(e==null||u==null)continue;if(e<u)win++;else if(u<e)win--;}
+    const A=a.map(p=>dispName(p)).join("/"),B=b.map(p=>dispName(p)).join("/");
+    return {summary:win===0?"Match nul (½)":`${win>0?A:B} gagne ${Math.abs(win)} trou(s)`,
+      winner:win>0?A:win<0?B:null};
+  }
+  if(f==="mexicaine"){
+    // 2v2 BRUT. Par trou : nombre à 2 chiffres (meilleur en 1er). Croix = par+4.
+    // Inversion du nombre de l'équipe SANS birdie si l'autre a ≥1 birdie (sinon annulé).
+    // Puis bonus : par+par +5, birdie+birdie +10. Plus petit nombre gagne, écart = diff.
+    const a=ps.slice(0,2),b=ps.slice(2,4);
+    const pars=holePars(course);
+    const teamNum=(team,h,oppHasBirdie,parH)=>{
+      // scores bruts des 2 joueurs, croix = par+4
+      const raw=team.map(p=>{const g=sg.scores?.[p.id]?.[h];return g==null?null:g;});
+      if(raw.some(x=>x==null)) return null;
+      const sc=raw.map(g=>g); // déjà bruts
+      const birdies=sc.filter(s=>s<parH).length;
+      const lo=Math.min(...sc),hi=Math.max(...sc);
+      let num=lo*10+hi;                 // meilleur en premier
+      // inversion : cette équipe n'a aucun birdie ET l'adversaire en a
+      if(birdies===0 && oppHasBirdie) num=hi*10+lo;
+      // bonus (après inversion)
+      if(sc[0]===parH&&sc[1]===parH) num+=5;            // par + par
+      if(sc.every(s=>s<parH)) num+=10;                   // birdie + birdie (2 birdies)
+      return {num,birdies};
+    };
+    let cumA=0,cumB=0;
+    for(let h=0;h<18;h++){const parH=pars[h];
+      // 1er passage : connaître les birdies de chaque équipe (avant inversion)
+      const birds=(team)=>{const r=team.map(p=>sg.scores?.[p.id]?.[h]);
+        if(r.some(x=>x==null))return null;return r.filter(s=>s<parH).length;};
+      const ba=birds(a),bb=birds(b);
+      if(ba==null||bb==null) continue;
+      const na=teamNum(a,h,bb>0,parH),nb=teamNum(b,h,ba>0,parH);
+      if(!na||!nb) continue;
+      if(na.num<nb.num) cumA+=nb.num-na.num;
+      else if(nb.num<na.num) cumB+=na.num-nb.num;
+    }
+    const A=a.map(p=>dispName(p)).join("/"),B=b.map(p=>dispName(p)).join("/");
+    const lead=cumA>cumB?`${A} mène ${cumA}–${cumB}`:cumB>cumA?`${B} mène ${cumB}–${cumA}`:`Égalité ${cumA}–${cumB}`;
+    return {summary:lead,winner:cumA>cumB?A:cumB>cumA?B:null,mexA:cumA,mexB:cumB};
+  }
+  if(f==="fourball"||f==="foursome"||f==="scramble"){
+    const a=ps.slice(0,2),b=ps.slice(2,4);
+    const th_=(team,h)=>{const v=team.map(p=>nets[p.id][h]).filter(x=>x!=null);
+      return v.length?Math.min(...v):null;};
+    let win=0;for(let h=0;h<18;h++){const e=th_(a,h),u=th_(b,h);
+      if(e==null||u==null)continue;if(e<u)win++;else if(u<e)win--;}
+    const A=a.map(p=>dispName(p)).join("/"),B=b.map(p=>dispName(p)).join("/");
+    return {summary:win===0?"Égalité (½)":`${win>0?A:B} gagne ${Math.abs(win)} trou(s)`,
+      winner:win>0?A:win<0?B:null};
+  }
+  if(f==="stableford"||f==="stableford_net"||f==="stableford_gross"){
+    const par=course.par||72;const stbl={};
+    ps.forEach(p=>{let pts=0;for(let h=0;h<18;h++){const s=nets[p.id][h];if(s==null)continue;
+      const parH=Math.round(par/18);pts+=Math.max(0,2+(parH-s));}stbl[p.id]=pts;});
+    const rank=ps.map(p=>({name:dispName(p),pts:stbl[p.id],
+      bd:countNetBirdies(nets[p.id],course)}))
+      .sort((a,b)=>b.pts-a.pts||b.bd-a.bd);
+    const tag=f==="stableford_gross"?" (brut)":f==="stableford_net"?" (net)":"";
+    return {summary:rank.map(r=>`${r.name} ${r.pts}pts`).join(" · ")+tag,winner:rank[0]?.name};
+  }
+  if(f==="skins"){
+    // 18 points en jeu (1 par trou). Trou nul → le point se REPORTE sur le(s) suivant(s).
+    const sk={};ps.forEach(p=>sk[p.id]=0);let carry=0;
+    for(let h=0;h<18;h++){const vals=ps.map(p=>({id:p.id,s:nets[p.id][h]})).filter(x=>x.s!=null);
+      if(!vals.length){carry++;continue;}
+      const min=Math.min(...vals.map(v=>v.s));
+      const w=vals.filter(v=>v.s===min);
+      if(w.length===1){sk[w[0].id]+=1+carry;carry=0;}else carry++;}
+    const rank=ps.map(p=>({name:dispName(p),s:sk[p.id],
+      bd:countNetBirdies(nets[p.id],course)})).sort((a,b)=>b.s-a.s||b.bd-a.bd);
+    const enJeu=Object.values(sk).reduce((a,b)=>a+b,0);
+    const note=carry>0?` · ${carry} pt(s) non attribué(s) (dernier trou nul)`:"";
+    return {summary:rank.map(r=>`${r.name} ${r.s}`).join(" · ")+` skins (${enJeu}/18)`+note,
+      winner:rank[0]?.s>0?rank[0]?.name:null};
+  }
+  const rank=ps.map(p=>({name:dispName(p),tot:nets[p.id].reduce((a,b)=>a+(b||0),0),
+    bd:countNetBirdies(nets[p.id],course)}))
+    .sort((a,b)=>a.tot-b.tot||b.bd-a.bd);
+  return {summary:rank.map(r=>`${r.name} ${r.tot}`).join(" · "),winner:rank[0]?.name};
+}
+
+/* ===== Points championnat (2 victoire / 1 nul / 0 défaite) par joueur d'une sous-partie
+   + confrontations individuelles (head-to-head) ===== */
+function playerScores(sg,ps,course,net){
+  if(!course||!ps.length||ps.length<2) return {pts:{},h2h:[]};
+  const useNet = sg.formula==="stableford_net"?true:sg.formula==="stableford_gross"?false:net;
+  const holeNet=p=>{const t=teeData(course,p.tee);
+    const chp=courseHandicap(p.index,t.slope,t.cr,t.par);
+    const strokes=strokesPerHole(chp,course.si);
+    return Array.from({length:18},(_,i)=>{const g=sg.scores?.[p.id]?.[i];
+      if(g==null) return null;return useNet?g-strokes[i]:g;});};
+  const nets={};ps.forEach(p=>nets[p.id]=holeNet(p));
+  const total=p=>nets[p.id].reduce((a,b)=>a+(b||0),0);
+  const played=p=>nets[p.id].some(v=>v!=null);
+  if(!ps.some(played)) return {pts:{},h2h:[]}; // pas encore de scores
+
+  const f=sg.formula;
+  const pts={};const h2h=[];
+
+  // Mexicaine : résultat collectif via le calcul dédié (cumul des écarts)
+  if(f==="mexicaine"){
+    const a=ps.slice(0,2),b=ps.slice(2,4);
+    const r=computeSub(sg,ps,course,net)||{};
+    const cumA=r.mexA||0,cumB=r.mexB||0;
+    const av=cumA>cumB?2:cumA<cumB?0:1, bv=cumB>cumA?2:cumB<cumA?0:1;
+    a.forEach(p=>pts[p.id]=av); b.forEach(p=>pts[p.id]=bv);
+    return {pts,h2h};
+  }
+  // Formats équipe : 2 vs 2 → victoire collective, points partagés par membre
+  if(f==="fourball"||f==="foursome"||f==="scramble"||f==="matchplay2v2"){
+    const a=ps.slice(0,2),b=ps.slice(2,4);
+    const th=(team,h)=>{const v=team.map(p=>nets[p.id][h]).filter(x=>x!=null);
+      return v.length?Math.min(...v):null;};
+    let w=0;for(let h=0;h<18;h++){const e=th(a,h),u=th(b,h);
+      if(e==null||u==null)continue;if(e<u)w++;else if(u<e)w--;}
+    const av=w>0?2:w<0?0:1, bv=w<0?2:w>0?0:1;
+    a.forEach(p=>pts[p.id]=av); b.forEach(p=>pts[p.id]=bv);
+    return {pts,h2h};
+  }
+  // Tous les autres (1v1, chouette, 1v1v1, stableford, skins, stroke) :
+  // classement par total net croissant ; départage à égalité = birdies nets (plus = mieux).
+  const bd=p=>countNetBirdies(nets[p.id],course);
+  const cmp=(x,y)=>total(x)-total(y)||bd(y)-bd(x); // total asc, puis birdies desc
+  const ranked=[...ps].filter(played).sort(cmp);
+  if(!ranked.length) return {pts:{},h2h:[]};
+  // gagnant(s) : total ET birdies identiques au meilleur = égalité parfaite
+  const top=ranked[0];
+  const winners=ranked.filter(p=>total(p)===total(top)&&bd(p)===bd(top));
+  ps.forEach(p=>pts[p.id]=0);
+  if(winners.length===1) pts[winners[0].id]=2;
+  else winners.forEach(p=>pts[p.id]=1); // égalité parfaite (total + birdies) = nul
+  // confrontations individuelles (chaque paire), départage birdies nets
+  for(let i=0;i<ranked.length;i++)for(let j=i+1;j<ranked.length;j++){
+    const A=ranked[i],B=ranked[j],ta=total(A),tb=total(B),ba=bd(A),bb=bd(B);
+    let res;
+    if(ta<tb) res="a"; else if(tb<ta) res="b";
+    else if(ba>bb) res="a"; else if(bb>ba) res="b"; else res="nul";
+    h2h.push({a:A.id,b:B.id,res});
+  }
+  return {pts,h2h};
+}
+
+const SEED_MEMBERS=[
+  {id:1,name:"Philippe",nick:"Phil",index:6},
+  {id:2,name:"Romain",nick:"Rory choux fleur",index:12},
+  {id:3,name:"Richard",nick:"Trichatard",index:18},
+  {id:4,name:"Jean-Paul",nick:"Popcorn salé",index:9},
+  {id:5,name:"Jean-Pierre",nick:"Pied fou",index:15},
+  {id:6,name:"Thomas",nick:"",index:15},
+  {id:7,name:"Nico",nick:"Le Na",index:25},
+];
+// Base CATALOGNE pré-remplie — SSS/Slope INDICATIFS à corriger une fois sur place.
+// Stroke index générique par défaut ; ajuste si besoin dans l'onglet Parcours.
+const SI_DEF=[7,13,1,11,5,17,3,15,9,8,14,2,12,6,18,4,16,10];
+const SEED_COURSES=[
+  {id:1,name:"Golf Platja de Pals",country:"Espagne",par:73,si:SI_DEF,
+    tees:[{name:"Jaune",cr:71.8,slope:134,par:73},
+          {name:"Blanc",cr:73.5,slope:138,par:73},
+          {name:"Bleu",cr:72.4,slope:136,par:73},
+          {name:"Rouge",cr:73.2,slope:131,par:73}]},
+  {id:2,name:"Empordà — Forest",country:"Espagne",par:72,si:SI_DEF,
+    tees:[{name:"Jaune",cr:72.1,slope:138,par:72},
+          {name:"Blanc",cr:73.8,slope:142,par:72},
+          {name:"Rouge",cr:73.0,slope:133,par:72}]},
+  {id:3,name:"Empordà — Links",country:"Espagne",par:71,si:SI_DEF,
+    tees:[{name:"Jaune",cr:71.0,slope:132,par:71},
+          {name:"Blanc",cr:72.6,slope:137,par:71},
+          {name:"Rouge",cr:72.1,slope:129,par:71}]},
+  {id:4,name:"PGA Catalunya — Stadium",country:"Espagne",par:72,si:SI_DEF,
+    tees:[{name:"Jaune",cr:73.5,slope:145,par:72},
+          {name:"Blanc",cr:75.2,slope:151,par:72},
+          {name:"Rouge",cr:74.0,slope:139,par:72}]},
+  {id:5,name:"PGA Catalunya — Tour",country:"Espagne",par:72,si:SI_DEF,
+    tees:[{name:"Jaune",cr:71.6,slope:133,par:72},
+          {name:"Blanc",cr:73.0,slope:137,par:72},
+          {name:"Rouge",cr:72.4,slope:128,par:72}]},
+  {id:6,name:"Club de Golf Costa Brava — Verde",country:"Espagne",par:70,si:SI_DEF,
+    tees:[{name:"Jaune",cr:69.4,slope:130,par:70},
+          {name:"Blanc",cr:70.8,slope:134,par:70},
+          {name:"Rouge",cr:70.2,slope:126,par:70}]},
+  {id:7,name:"Club de Golf Costa Brava — Rojo",country:"Espagne",par:73,si:SI_DEF,
+    tees:[{name:"Jaune",cr:71.5,slope:132,par:73},
+          {name:"Blanc",cr:73.0,slope:136,par:73},
+          {name:"Rouge",cr:72.4,slope:128,par:73}]},
+  {id:8,name:"Golf d'Aro — Mas Nou",country:"Espagne",par:72,si:SI_DEF,
+    tees:[{name:"Jaune",cr:72.0,slope:136,par:72},
+          {name:"Blanc",cr:73.6,slope:140,par:72},
+          {name:"Rouge",cr:72.8,slope:131,par:72}]},
+  {id:9,name:"Torremirona Golf Club",country:"Espagne",par:72,si:SI_DEF,
+    tees:[{name:"Jaune",cr:70.4,slope:126,par:72},
+          {name:"Blanc",cr:71.8,slope:130,par:72},
+          {name:"Rouge",cr:71.2,slope:122,par:72}]},
+  {id:10,name:"Club de Golf Peralada",country:"Espagne",par:71,si:SI_DEF,
+    tees:[{name:"Jaune",cr:70.8,slope:131,par:71},
+          {name:"Blanc",cr:72.2,slope:135,par:71},
+          {name:"Rouge",cr:71.6,slope:127,par:71}]},
+  {id:11,name:"Golf Girona",country:"Espagne",par:72,si:SI_DEF,
+    tees:[{name:"Jaune",cr:71.2,slope:133,par:72},
+          {name:"Blanc",cr:72.8,slope:138,par:72},
+          {name:"Rouge",cr:72.0,slope:129,par:72}]},
+  {id:12,name:"Camiral (PGA Catalunya Resort)",country:"Espagne",par:72,si:SI_DEF,
+    tees:[{name:"Jaune",cr:73.0,slope:142,par:72},
+          {name:"Blanc",cr:74.6,slope:148,par:72},
+          {name:"Rouge",cr:73.4,slope:135,par:72}]},
+  // ---- Région PACA / Marseille (SSS/Slope indicatifs à corriger) ----
+  {id:13,name:"La Salette (Marseille)",country:"France",par:71,si:SI_DEF,
+    tees:[{name:"Jaune",cr:69.2,slope:130,par:71},{name:"Blanc",cr:70.6,slope:134,par:71},
+          {name:"Rouge",cr:70.0,slope:126,par:71}]},
+  {id:14,name:"Barbaroux",country:"France",par:72,si:SI_DEF,
+    tees:[{name:"Jaune",cr:72.4,slope:140,par:72},{name:"Blanc",cr:74.0,slope:145,par:72},
+          {name:"Rouge",cr:73.0,slope:133,par:72}]},
+  {id:15,name:"Pont Royal",country:"France",par:72,si:SI_DEF,
+    tees:[{name:"Jaune",cr:72.6,slope:142,par:72},{name:"Blanc",cr:74.2,slope:147,par:72},
+          {name:"Rouge",cr:73.2,slope:134,par:72}]},
+  {id:16,name:"Sainte-Victoire (Fuveau)",country:"France",par:72,si:SI_DEF,
+    tees:[{name:"Jaune",cr:71.0,slope:133,par:72},{name:"Blanc",cr:72.4,slope:137,par:72},
+          {name:"Rouge",cr:71.8,slope:128,par:72}]},
+  {id:17,name:"Miramas (Les Cabanes)",country:"France",par:72,si:SI_DEF,
+    tees:[{name:"Jaune",cr:71.2,slope:131,par:72},{name:"Blanc",cr:72.6,slope:135,par:72},
+          {name:"Rouge",cr:72.0,slope:127,par:72}]},
+  {id:18,name:"Aix-Marseille (Set Aix / Les Milles)",country:"France",par:72,si:SI_DEF,
+    tees:[{name:"Jaune",cr:71.4,slope:132,par:72},{name:"Blanc",cr:72.8,slope:136,par:72},
+          {name:"Rouge",cr:72.2,slope:128,par:72}]},
+  {id:19,name:"Nans (Sainte-Baume)",country:"France",par:72,si:SI_DEF,
+    tees:[{name:"Jaune",cr:71.6,slope:134,par:72},{name:"Blanc",cr:73.0,slope:138,par:72},
+          {name:"Rouge",cr:72.4,slope:130,par:72}]},
+  {id:20,name:"Servanes (Mouriès)",country:"France",par:72,si:SI_DEF,
+    tees:[{name:"Jaune",cr:71.0,slope:128,par:72},{name:"Blanc",cr:72.4,slope:132,par:72},
+          {name:"Rouge",cr:71.8,slope:124,par:72}]},
+  {id:21,name:"Cabriès (Cabre d'Or)",country:"France",par:70,si:SI_DEF,
+    tees:[{name:"Jaune",cr:68.8,slope:127,par:70},{name:"Blanc",cr:70.2,slope:131,par:70},
+          {name:"Rouge",cr:69.6,slope:123,par:70}]},
+  {id:22,name:"Saumane (Provence)",country:"France",par:72,si:SI_DEF,
+    tees:[{name:"Jaune",cr:71.2,slope:133,par:72},{name:"Blanc",cr:72.6,slope:137,par:72},
+          {name:"Rouge",cr:72.0,slope:129,par:72}]},
+];
+
+function Section({children}){return <div style={{fontFamily:"'Archivo',sans-serif",
+  fontWeight:800,fontSize:13,letterSpacing:1.5,textTransform:"uppercase",
+  color:T.dim,margin:"20px 0 10px"}}>{children}</div>;}
+function Field({label,children}){return <label style={{flex:1,display:"block",marginTop:8}}>
+  <span style={{fontSize:10,color:T.dim,textTransform:"uppercase",letterSpacing:.5,
+    fontWeight:700}}>{label}</span>
+  {children}</label>;}
+function Pill({active,onClick,children}){return <button onClick={onClick} style={{flex:1,
+  padding:"13px 14px",borderRadius:16,border:active?"none":`1.5px solid ${T.line}`,
+  background:active?T.accent:"transparent",color:active?T.ink:T.text,
+  fontWeight:800,fontSize:14,cursor:"pointer",
+  boxShadow:active?`0 0 24px ${T.accent}44`:"none",transition:"all .15s"}}>
+  {children}</button>;}
+function Warn({children}){return <div style={{background:`${T.us}1a`,
+  border:`1px solid ${T.us}55`,borderRadius:14,padding:12,fontSize:12,color:"#ff9b9b",
+  marginTop:8}}>⚠️ {children}</div>;}
+function Empty({text}){return <div style={{background:T.panel,borderRadius:16,
+  textAlign:"center",color:T.dim,padding:"28px 18px",marginTop:30,
+  border:`1px solid ${T.line}`}}>{text}</div>;}
+
+const shell={fontFamily:"'Manrope',system-ui,sans-serif",background:T.bg,color:T.text,
+  minHeight:"100vh",maxWidth:480,margin:"0 auto",paddingBottom:84};
+// cartes : coins très arrondis, bordure fine, plus de bandeau latéral
+const card=b=>({background:T.panel,border:`1px solid ${b}2e`,
+  borderRadius:18,padding:14,marginBottom:11,boxShadow:"0 1px 0 rgba(255,255,255,.02)"});
+const inp={width:"100%",background:"#0c130e",border:`1.5px solid ${T.line}`,color:T.text,
+  borderRadius:14,padding:"12px 13px",fontSize:14,marginTop:4,outline:"none"};
+// bouton principal = pilule vert fairway, glow léger
+const addBtn={width:"100%",marginTop:14,padding:"15px",border:"none",borderRadius:18,
+  background:T.accent,color:T.ink,fontWeight:800,fontSize:15,cursor:"pointer",
+  boxShadow:`0 6px 24px ${T.accent}33`,letterSpacing:.3};
+const delBtn={background:"transparent",border:`1.5px solid ${T.line}`,color:T.dim,
+  borderRadius:12,padding:"7px 12px",cursor:"pointer",fontSize:12,fontWeight:700};
+const miniBtn={border:`1.5px solid ${T.line}`,color:T.text,borderRadius:999,
+  background:T.panel,padding:"6px 12px",cursor:"pointer",fontSize:11,fontWeight:800};
+const chip={borderRadius:999,padding:"9px 15px",fontSize:13,cursor:"pointer",color:T.text,
+  background:T.panel,fontWeight:800};
+const cell={width:28,textAlign:"center",background:"#0c130e",border:`1.5px solid ${T.line}`,
+  color:T.text,borderRadius:8,padding:"4px 0",fontSize:11,fontWeight:700};
+const th={padding:"3px 1px",color:T.dim,fontSize:9,borderBottom:`1px solid ${T.line}`,
+  fontWeight:800};
+const td={padding:"3px 1px",textAlign:"center",borderBottom:`1px solid ${T.line}22`};
+const tabbar={position:"fixed",bottom:0,left:0,right:0,maxWidth:480,margin:"0 auto",
+  display:"flex",background:"rgba(8,13,10,.92)",backdropFilter:"blur(12px)",
+  borderTop:`1px solid ${T.line}`,padding:"8px 4px 12px"};
+const tabBtn={flex:1,background:"none",border:"none",cursor:"pointer",padding:"6px 2px",
+  display:"flex",flexDirection:"column",alignItems:"center",gap:3};
+const GLOBAL_CSS=`@import url('https://fonts.googleapis.com/css2?family=Anton&family=Archivo:wght@600;700;800;900&family=Manrope:wght@400;500;600;700;800&display=swap');
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  input,select{font-family:inherit}
+  body{background:#0a0f0c}
+  ::selection{background:${T.accent};color:${T.ink}}
+  @keyframes pop{0%{transform:scale(.7);opacity:0}60%{transform:scale(1.08)}100%{transform:scale(1);opacity:1}}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  @keyframes glow{0%,100%{box-shadow:0 0 18px ${T.accent}33}50%{box-shadow:0 0 30px ${T.accent}66}}`;

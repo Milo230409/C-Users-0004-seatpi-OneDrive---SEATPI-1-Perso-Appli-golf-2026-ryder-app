@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#10211a"/>
+      <stop offset="1" stop-color="#0a0f0c"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="#0a0f0c"/>
+  <!-- écusson -->
+  <path d="M256 64 L420 116 V268 C420 360 348 418 256 452 C164 418 92 360 92 268 V116 Z"
+        fill="url(#bg)" stroke="#86e01e" stroke-width="10"/>
+  <path d="M256 64 L420 116 V268 C420 360 348 418 256 452 C164 418 92 360 92 268 V116 Z"
+        fill="none" stroke="#86e01e" stroke-width="2" opacity="0.4"
+        transform="translate(0,10) scale(0.94) translate(16,8)"/>
+  <!-- monogramme G & A -->
+  <text x="256" y="250" font-family="Georgia, 'Times New Roman', serif" font-weight="700"
+        font-size="150" fill="#eef5ef" text-anchor="middle">G</text>
+  <text x="256" y="330" font-family="Georgia, serif" font-style="italic" font-weight="700"
+        font-size="120" fill="#86e01e" text-anchor="middle">&amp;</text>
+  <text x="256" y="412" font-family="Georgia, 'Times New Roman', serif" font-weight="700"
+        font-size="110" fill="#eef5ef" text-anchor="middle">A</text>
+</svg>

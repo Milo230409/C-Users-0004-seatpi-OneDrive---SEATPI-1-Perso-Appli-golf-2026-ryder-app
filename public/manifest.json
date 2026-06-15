@@ -1,0 +1,12 @@
+{
+  "name": "Du Golf & des Amis",
+  "short_name": "Golf & Amis",
+  "description": "Organisez vos parties, tournois et Ryder Cup entre amis",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0a0f0c",
+  "theme_color": "#0a0f0c",
+  "icons": [
+    { "src": "/icon.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
