@@ -257,7 +257,7 @@ export default function App(){
     const stale=courses.filter(c=>c.source==="api"&&c.apiId&&(now-(c.updated||0))>SIX);
     setStaleCount(stale.length);},[courses,user]);
   if(!user) return <WhoAreYou members={members} loaded={loaded} cloud={cloud}
-    onPick={setUser}/>;
+    setMembers={saveMembers} onPick={setUser}/>;
   const LOGIN_ENABLED=true;
   // rafraîchit tous les parcours API périmés (sur action de l'utilisateur)
   const refreshStale=async()=>{
@@ -297,18 +297,82 @@ export default function App(){
   );
 }
 
-function WhoAreYou({members,loaded,cloud,onPick}){
+// "MOT DE PASSE SOFT" : pour revenir, le joueur confirme son index de la dernière
+// connexion (= son mot de passe). S'il est bon, il confirme/ met à jour son index du
+// jour (il a pu progresser) — ce nouvel index fera foi pour la prochaine connexion.
+function SoftLogin({player,onOk,onCancel}){
+  const ref=parseFloat(player.index)||0;
+  const [step,setStep]=useState("check");
+  const [val,setVal]=useState("");
+  const [newIdx,setNewIdx]=useState(String(ref));
+  const [err,setErr]=useState("");
+  const check=()=>{
+    if(val.trim()==="") return setErr("Saisis ton index de la dernière connexion.");
+    if(Math.abs(parseFloat(val)-ref)<0.05){ setErr(""); setStep("update"); }
+    else setErr("Index incorrect. C'est l'index de ta dernière connexion qui sert de mot de passe.");
+  };
+  const finish=()=>{
+    const ni=parseFloat(newIdx);
+    if(Number.isNaN(ni)) return setErr("Indique ton index du jour.");
+    onOk(ni);
+  };
+  return (
+    <div style={shell}><style>{GLOBAL_CSS}</style>
+    <div style={{padding:"40px 24px"}}>
+      <CrestLogo size={80}/>
+      <div style={{fontFamily:"'Archivo',sans-serif",fontWeight:900,fontSize:22,marginTop:12}}>
+        Content de te revoir, {dispName(player)} 👋</div>
+      {step==="check" ? <>
+        <div style={{fontSize:13,color:T.dim,marginTop:8,marginBottom:18,lineHeight:1.5}}>
+          Pour vérifier que c'est bien toi, saisis <b>ton index lors de ta dernière connexion</b>
+          {" "}(c'est ton « mot de passe »).</div>
+        <Field label="Index de la dernière connexion">
+          <input type="number" step="0.1" value={val} autoFocus
+            onChange={e=>setVal(e.target.value)} onKeyDown={e=>e.key==="Enter"&&check()}
+            placeholder="ex: 15.4" style={inp}/></Field>
+        {err&&<div style={{color:T.gold,fontSize:12,marginTop:8}}>{err}</div>}
+        <button onClick={check} style={addBtn}>Confirmer</button>
+      </> : <>
+        <div style={{fontSize:13,color:T.accent,marginTop:8,fontWeight:800}}>✅ C'est bien toi !</div>
+        <div style={{fontSize:13,color:T.dim,marginTop:6,marginBottom:18,lineHeight:1.5}}>
+          Confirme ton <b>index du jour</b> (tu as peut-être progressé). Il fera foi pour ta
+          prochaine connexion.</div>
+        <Field label="Mon index aujourd'hui">
+          <input type="number" step="0.1" value={newIdx} autoFocus
+            onChange={e=>setNewIdx(e.target.value)} onKeyDown={e=>e.key==="Enter"&&finish()}
+            style={inp}/></Field>
+        {err&&<div style={{color:T.gold,fontSize:12,marginTop:8}}>{err}</div>}
+        <button onClick={finish} style={addBtn}>Entrer</button>
+      </>}
+      <button onClick={onCancel} style={{...delBtn,width:"100%",marginTop:8,padding:"11px"}}>
+        ← Retour</button>
+    </div></div>
+  );
+}
+
+function WhoAreYou({members,loaded,cloud,onPick,setMembers}){
   const [adding,setAdding]=useState(false);
   const [profileFor,setProfileFor]=useState(null); // joueur dont on complète la fiche
+  const [verifyFor,setVerifyFor]=useState(null);   // joueur en "MDP soft"
   const [nm,setNm]=useState("");
-  const list=[...members].sort((a,b)=>dispName(a).localeCompare(dispName(b)));
+  // on n'affiche QUE les vrais profils : un invité jamais nommé n'est pas archivé/listé
+  const realName=p=>p.name&&p.name.trim()&&p.name.trim().toLowerCase()!=="invité";
+  const hasIndex=p=>p.index!=null&&!Number.isNaN(parseFloat(p.index));
+  const list=members.filter(realName).sort((a,b)=>dispName(a).localeCompare(dispName(b)));
 
   const enterAs=(p)=>onPick({id:p.id,name:p.name,nick:p.nick,email:p.email,
     mobile:p.mobile,index:p.index,player:true});
-  // choisir un joueur : si profil pas complété → formulaire obligatoire
-  const choose=(p)=>{ if(p.profileDone) enterAs(p); else setProfileFor(p); };
-  const guest=()=>onPick({name:"Invité",guest:true});
+  // revenir : si on connaît son index → "MDP soft" (confirme l'index) ; sinon → profil à compléter
+  const choose=(p)=>{ if(hasIndex(p)) setVerifyFor(p); else setProfileFor(p); };
+  // MDP soft validé : met à jour l'index (qui fait foi la prochaine fois) puis entre
+  const softOk=(p,newIndex)=>{
+    const updated={...p,index:newIndex,profileDone:true};
+    if(setMembers) setMembers(members.map(m=>m.id===p.id?updated:m));
+    enterAs(updated);
+  };
 
+  if(verifyFor) return <SoftLogin player={verifyFor}
+    onOk={(ni)=>softOk(verifyFor,ni)} onCancel={()=>setVerifyFor(null)}/>;
   if(profileFor) return <ProfileForm player={profileFor} cloud={cloud}
     onDone={(updated)=>{ enterAs(updated); }}
     onCancel={()=>setProfileFor(null)}/>;
@@ -658,9 +722,11 @@ function NewGame({setTab}){
 
   const create=()=>{
     if(n<2)return alert("Au moins 2 joueurs.");
-    // Un invité AVEC un index renseigné (>0) devient un joueur permanent du groupe.
-    const keepers=guests.filter(g=>(parseFloat(g.index)||0)>0)
-      .map(g=>({id:g.id,name:g.name?.trim()||"Joueur",nick:g.nick?.trim()||"",
+    // On n'archive un invité comme joueur permanent QUE s'il a saisi un VRAI prénom
+    // (différent de "Invité") ET un index. Un invité jamais nommé est oublié, pas archivé.
+    const realName=g=>g.name&&g.name.trim()&&g.name.trim().toLowerCase()!=="invité";
+    const keepers=guests.filter(g=>realName(g)&&(parseFloat(g.index)||0)>0)
+      .map(g=>({id:g.id,name:g.name.trim(),nick:g.nick?.trim()||"",
         index:parseFloat(g.index)||0,profileDone:false,guest:false}));
     if(keepers.length){
       const existingIds=new Set(members.map(m=>m.id));
