@@ -1383,6 +1383,10 @@ function GameDetail({g,members,courses,games,setGames,back}){
     :((g.subgames&&g.subgames.length===1)?g.scorerId:undefined);
   // qui peut saisir CETTE sous-partie ? son scoreur. Si aucun scoreur défini, tout le monde peut.
   const canEditSub=sg=>{const s=scorerOf(sg);return !s||String(s)===String(myId);};
+  // la sous-partie où JE suis (joueur ou scoreur) : on n'affiche que celle-là à la saisie
+  const isMine=sg=>(sg.players||[]).some(id=>String(id)===String(myId))
+    ||String(scorerOf(sg))===String(myId);
+  const [showAll,setShowAll]=useState(false);
   const setTeam=(pid,team)=>save({...g,roster:g.roster.map(p=>p.id===pid?{...p,team}:p)});
   const assignTeams=(assign)=>save({...g,roster:g.roster.map(p=>
     assign[p.id]!==undefined?{...p,team:assign[p.id]}:p)});
@@ -1429,12 +1433,27 @@ function GameDetail({g,members,courses,games,setGames,back}){
       {view==="briefing" && <Briefing g={g} course={refCourse} playerById={playerById}
         onStart={()=>setView("score")}/>}
 
-      {view==="score" && <>
+      {view==="score" && (()=>{
+        // n'afficher que la partie où je suis (sauf si terminé ou si je déplie tout).
+        // Si je ne joue dans aucune partie (organisateur/spectateur), on montre tout.
+        const allSubs=isTournament?g.rounds.flatMap(r=>r.subgames):(g.subgames||[]);
+        const iPlay=allSubs.some(isMine);
+        const multi=allSubs.length>1;
+        const focus=!g.done&&!showAll&&iPlay;        // mode "ma partie seulement"
+        const keep=list=>focus?list.filter(isMine):list;
+        return <>
         {g.subtype==="ryder"&&<DrawHats g={g} onAssign={assignTeams}/>}
         {(g.type==="event")&&<TeamManager g={g} renameTeam={renameTeam} setTeam={setTeam}/>}
 
+        {multi&&iPlay&&!g.done&&<button onClick={()=>setShowAll(s=>!s)}
+          style={{...delBtn,width:"100%",marginBottom:12,fontSize:12,
+            borderColor:T.violet,color:T.violet}}>
+          {showAll?"👁️ N'afficher que ma partie":"👁️ Voir toutes les parties"}</button>}
+
         {isTournament ? g.rounds.map(r=>{
           const rc=courses.find(c=>c.id===r.courseId);
+          const subs=keep(r.subgames);
+          if(!subs.length) return null;            // manche où je ne joue pas : masquée
           return (
             <div key={r.id} style={{marginBottom:18}}>
               <div style={{fontFamily:"Anton",fontSize:16,margin:"6px 0",
@@ -1442,8 +1461,8 @@ function GameDetail({g,members,courses,games,setGames,back}){
                 <span style={{background:T.gold,color:"#1a1200",borderRadius:6,
                   padding:"2px 8px",fontSize:13}}>MANCHE {r.id}</span>
                 {rc?.name}</div>
-              {r.subgames.map((sg,si)=>(<div key={sg.id}>
-                {!g.done&&<ScorerPicker sg={sg} label={r.subgames.length>1?`Partie ${si+1}`:null}
+              {subs.map(sg=>{const num=r.subgames.indexOf(sg)+1;return (<div key={sg.id}>
+                {!g.done&&<ScorerPicker sg={sg} label={r.subgames.length>1?`Partie ${num}`:null}
                   scorerId={scorerOf(sg)} canEdit={canEditSub(sg)} myId={myId}
                   players={sg.players.map(playerById).filter(Boolean)}
                   onPick={pid=>setScorerRound(r.id,sg.id,pid)} playerById={playerById}/>}
@@ -1451,25 +1470,25 @@ function GameDetail({g,members,courses,games,setGames,back}){
                   setScore={(sid,pid,h,v)=>setScoreRound(r.id,sid,pid,h,v)}
                   validateHole={(sid,h)=>toggleHoleRound(r.id,sid,h)}
                   done={g.done||!canEditSub(sg)}/>
-              </div>))}
+              </div>);})}
             </div>
           );
-        }) : g.subgames.map((sg,si)=>(<div key={sg.id}>
-          {!g.done&&<ScorerPicker sg={sg} label={g.subgames.length>1?`Partie ${si+1}`:null}
+        }) : keep(g.subgames).map(sg=>{const num=g.subgames.indexOf(sg)+1;return (<div key={sg.id}>
+          {!g.done&&<ScorerPicker sg={sg} label={g.subgames.length>1?`Partie ${num}`:null}
             scorerId={scorerOf(sg)} canEdit={canEditSub(sg)} myId={myId}
             players={sg.players.map(playerById).filter(Boolean)}
             onPick={pid=>setScorerSimple(sg.id,pid)} playerById={playerById}/>}
           <SubGame sg={sg} course={refCourse} mode={g.mode}
             playerById={playerById} setScore={setScoreSimple}
             validateHole={toggleHoleSimple} done={g.done||!canEditSub(sg)}/>
-        </div>))}
+        </div>);})}
 
         <button onClick={toggleDone} style={{...addBtn,background:g.done?T.line:T.accent,
           color:g.done?T.text:"#04150b"}}>
           {g.done?"↩ Rouvrir":"✅ Valider (révéler résultats)"}</button>
         {g.type==="event"&&g.done&&<EventBoard g={g} courses={courses} playerById={playerById}/>}
         {g.done&&<ShareResults g={g} courses={courses} playerById={playerById}/>}
-      </>}
+      </>;})()}
     </div>
   );
 }
