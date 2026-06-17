@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, loadMyProfile, saveMyProfile, su
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.9 · accueil"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.10 · faq parcours"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -595,6 +595,7 @@ function FaqTab(){
     ["🔑 Te reconnecter (mot de passe « soft »)","Les fois suivantes, on te demande ton index de la dernière connexion : c'est ton mot de passe. Si tu as progressé, tu saisis ton nouvel index — il devient la référence pour la prochaine fois."],
     ["👤 Mon compte","Bouton 👤 en haut : tu peux changer ton surnom, ton index, ton mobile, ton email ou ta préférence de notif quand tu veux."],
     ["⛳ Lancer une partie","Onglet ➕ Nouvelle : choisis le parcours, les joueurs (et invités), la formule, Net ou Brut. Pour du match play, coche « Coups rendus en différentiel »."],
+    ["🗺️ Les parcours (tout est modifiable !)","15 parcours sont déjà préchargés. Tu peux en créer d'autres : l'appli sait chercher dans la base mondiale GolfCourseAPI (tous n'y sont pas), ou tu ajoutes un parcours à la main. Et TOUT est éditable dans l'onglet Parcours : si un index de trou (HCP), un par ou un slope est inexact, corrige-le UNE fois → c'est mémorisé pour toutes les parties suivantes. Rien d'irréversible, mais SOYEZ RIGOUREUX : on ne flingue pas les parcours du groupe (sinon c'est chiant à rattraper 😅). Merci 🙏"],
     ["✍️ Le scoreur","Dans chaque partie, on désigne qui « tient la carte » (le scoreur). À plusieurs parties simultanées, chaque partie a SON scoreur. Lui seul saisit les scores."],
     ["👀 Suivre en direct","Les autres joueurs ouvrent la même partie et suivent l'avancée en direct, en lecture seule. À la saisie, on ne voit que SA partie (bouton pour voir les autres)."],
     ["🏅 Les points (classement de saison)","On compte les DUELS (qui bat qui) : 1v1 → Victoire 3 · Nul 1 · Défaite 0. À 3 → 2 duels (V 2) : battre les 2 = 4. Double 2v2 → V 3 chacun. Indépendant de la formule de jeu."],
