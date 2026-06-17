@@ -1649,6 +1649,47 @@ function ShareResults({g,courses,playerById}){
 }
 
 /* ===== VUE BRIEFING : récap coups rendus, slope/SSS, départs, trous rendus ===== */
+// Tableau du parcours trou par trou (Par + Longueur + HCP) affiché dans le briefing.
+function HolesBriefing({course}){
+  const pars=holePars(course);
+  const si=(course?.si&&course.si.length===18)?course.si:Array.from({length:18},(_,i)=>i+1);
+  const len=(course?.lengths&&course.lengths.length===18)?course.lengths:null;
+  const totLen=course?.length||(len?len.reduce((a,b)=>a+(b||0),0):null);
+  const td={border:`1px solid ${T.line}`,padding:"3px 1px",textAlign:"center"};
+  const Block=({from,to,label})=>{
+    const idx=Array.from({length:to-from},(_,k)=>from+k);
+    const sp=idx.reduce((a,i)=>a+(pars[i]||0),0);
+    const sl=len?idx.reduce((a,i)=>a+(len[i]||0),0):null;
+    return (
+      <table style={{borderCollapse:"collapse",width:"100%",tableLayout:"fixed",
+        fontSize:11,marginBottom:8}}>
+        <tbody>
+          <tr><td style={{...td,textAlign:"left",color:T.dim,width:"13%"}}>{label}</td>
+            {idx.map(i=><td key={i} style={{...td,color:T.dim}}>{i+1}</td>)}
+            <td style={{...td,color:T.gold,fontWeight:800}}>Σ</td></tr>
+          <tr><td style={{...td,textAlign:"left",color:T.dim}}>Par</td>
+            {idx.map(i=><td key={i} style={td}>{pars[i]}</td>)}
+            <td style={{...td,fontWeight:800}}>{sp}</td></tr>
+          <tr><td style={{...td,textAlign:"left",color:T.accent}}>m</td>
+            {idx.map(i=><td key={i} style={td}>{len?len[i]:"—"}</td>)}
+            <td style={{...td,fontWeight:800,color:T.accent}}>{sl??"—"}</td></tr>
+          <tr><td style={{...td,textAlign:"left",color:T.gold}}>HCP</td>
+            {idx.map(i=><td key={i} style={td}>{si[i]}</td>)}
+            <td style={td}></td></tr>
+        </tbody>
+      </table>
+    );
+  };
+  return (
+    <div style={{...card(T.line),marginBottom:14}}>
+      <div style={{fontWeight:800,marginBottom:8}}>📋 Le parcours trou par trou
+        {totLen?<span style={{color:T.accent,fontWeight:700}}> · {totLen} m</span>:null}</div>
+      <Block from={0} to={9} label="Aller"/>
+      <Block from={9} to={18} label="Retour"/>
+    </div>
+  );
+}
+
 function Briefing({g,course,playerById,onStart}){
   const net=g.mode==="net";
   const rows=g.roster.map(p=>{
@@ -1673,6 +1714,8 @@ function Briefing({g,course,playerById,onStart}){
               {t.name} · SSS {t.cr} · Slope {t.slope}{t.length?` · ${t.length} m`:""}</span>))}
         </div>
       </div>
+
+      {course && <HolesBriefing course={course}/>}
 
       <Section>Coups rendus par joueur</Section>
       {rows.map(({p,t,chp,holes})=>(
