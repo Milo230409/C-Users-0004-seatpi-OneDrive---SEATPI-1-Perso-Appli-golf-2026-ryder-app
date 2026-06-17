@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, loadMyProfile, saveMyProfile, su
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.4 · classement"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.5 · FAQ"; // ← change à chaque mise en prod pour vérifier
 // Qui peut ouvrir le menu Réglages (clé API, lien WhatsApp…). Insensible à la casse.
 // Ajoute ici les prénoms/surnoms autorisés.
 const ADMIN_KEYS=["philippe","phil"];
@@ -315,6 +315,7 @@ export default function App(){
         {tab==="settings"&&(isAdmin(user)?<SettingsTab/>:
           <Empty text="🔒 Réglages réservés à l'organisateur."/>)}
         {tab==="account"&&<AccountTab/>}
+        {tab==="faq"&&<FaqTab/>}
         {tab==="history"&&<History/>}
       </div>
       <TabBar tabs={tabs} tab={tab} setTab={setTab}/>
@@ -581,6 +582,38 @@ function AccountTab(){
   );
 }
 
+// "Comment ça marche" : présentation + FAQ, accessible à tous (onboarding des potes).
+function FaqTab(){
+  const items=[
+    ["👋 Première connexion","Sur l'accueil « Qui es-tu ? », tape sur ton prénom. À ta 1re fois, tu remplis ta fiche UNE seule fois (surnom, index de jeu, mobile, email). C'est tout."],
+    ["🔑 Te reconnecter (mot de passe « soft »)","Les fois suivantes, on te demande ton index de la dernière connexion : c'est ton mot de passe. Si tu as progressé, tu saisis ton nouvel index — il devient la référence pour la prochaine fois."],
+    ["👤 Mon compte","Bouton 👤 en haut : tu peux changer ton surnom, ton index, ton mobile, ton email ou ta préférence de notif quand tu veux."],
+    ["⛳ Lancer une partie","Onglet ➕ Nouvelle : choisis le parcours, les joueurs (et invités), la formule, Net ou Brut. Pour du match play, coche « Coups rendus en différentiel »."],
+    ["✍️ Le scoreur","Dans chaque partie, on désigne qui « tient la carte » (le scoreur). À plusieurs parties simultanées, chaque partie a SON scoreur. Lui seul saisit les scores."],
+    ["👀 Suivre en direct","Les autres joueurs ouvrent la même partie et suivent l'avancée en direct, en lecture seule. À la saisie, on ne voit que SA partie (bouton pour voir les autres)."],
+    ["🏅 Les points (classement de saison)","On compte les DUELS (qui bat qui) : 1v1 → Victoire 3 · Nul 1 · Défaite 0. À 3 → 2 duels (V 2) : battre les 2 = 4. Double 2v2 → V 3 chacun. Indépendant de la formule de jeu."],
+    ["🏆 Les tournois","Chaque manche compte, ET le vainqueur du tournoi gagne +5 (trophée). En équipe (Ryder), on est SOLIDAIRES : on gagne et on perd ensemble, pas de carte individuelle."],
+    ["📊 Deux classements","« Cumulé » (qui joue plus marque plus) et « Moyenne par partie » (pour que ceux qui jouent peu aient leur chance). + le bilan des confrontations directes entre potes."],
+    ["💬 Partage WhatsApp","À la fin d'une partie (validation du 18e trou), tu vois le vainqueur, les points et l'évolution au classement — et tu partages tout au groupe en un clic."],
+    ["🔒 Réglages","Le menu ⚙️ (clé API parcours, lien du groupe WhatsApp) est réservé à l'organisateur, pour que personne n'efface un réglage par erreur."],
+  ];
+  return (
+    <div>
+      <Section>Comment ça marche</Section>
+      <div style={{...card(T.accent),fontSize:13,color:T.text,lineHeight:1.5,marginBottom:12}}>
+        Bienvenue chez <b>Du Golf & des Amis</b> ⛳ — l'appli pour jouer, scorer en direct et
+        suivre le classement de la saison entre potes. Voici l'essentiel :</div>
+      {items.map(([t,d],i)=>(
+        <div key={i} style={{...card(T.line),marginBottom:8}}>
+          <div style={{fontWeight:800,marginBottom:4}}>{t}</div>
+          <div style={{fontSize:13,color:T.dim,lineHeight:1.5}}>{d}</div>
+        </div>))}
+      <div style={{fontSize:11,color:T.dim,textAlign:"center",marginTop:10,marginBottom:20}}>
+        Une question en plus ? Demande à l'organisateur 😉</div>
+    </div>
+  );
+}
+
 function Header({user,onLogout,setTab,admin}){
   return (
     <div style={{padding:"22px 18px 14px",position:"relative",overflow:"hidden",
@@ -596,6 +629,8 @@ function Header({user,onLogout,setTab,admin}){
           <div style={{fontSize:11,color:T.dim,marginTop:3,fontWeight:600,letterSpacing:.3}}>
             {onLogout?`Salut ${user.nick?.trim()||user.name} 👋`:"Joue, partage, kiffe"}</div></div></div>
       <div style={{display:"flex",gap:8,alignItems:"center"}}>
+        {setTab&&<button onClick={()=>setTab("faq")} title="Comment ça marche"
+          style={{...delBtn,fontSize:14,padding:"7px 10px"}}>❔</button>}
         {setTab&&onLogout&&<button onClick={()=>setTab("account")} title="Mon compte"
           style={{...delBtn,fontSize:14,padding:"7px 10px"}}>👤</button>}
         {setTab&&admin&&<button onClick={()=>setTab("settings")} title="Réglages"
@@ -1094,52 +1129,82 @@ function CourseAutocomplete({courses,setCourses,courseId,setCourseId}){
 }
 
 /* ===== CHAMPIONNAT : points 2/1/0 par joueur, cumulé + moyenne + confrontations ===== */
+// Classement de saison à partir des parties terminées → {S:id->{pts,played,win,draw,loss}, H}.
+// Réutilisé pour le championnat ET le résumé de fin de partie.
+function computeStandings(done, courses){
+  const S={}, H={};
+  const ensure=id=>{if(!S[id])S[id]={pts:0,played:0,win:0,draw:0,loss:0};return S[id];};
+  done.forEach(g=>{
+    const net=g.mode==="net";
+    const subs=g.rounds
+      ? g.rounds.flatMap(r=>r.subgames.map(sg=>({sg,course:courses.find(c=>c.id===r.courseId)})))
+      : (g.subgames||[]).map(sg=>({sg,course:courses.find(c=>c.id===g.courseId)}));
+    const teamTournament = g.rounds && g.teamNames && g.roster?.some(p=>p.team===0||p.team===1);
+    if(teamTournament){
+      // SOLIDARITÉ : chaque match d'équipe compte pour TOUS les coéquipiers (on gagne et on
+      // perd ensemble, pas de carte individuelle). +5 trophée à l'équipe championne.
+      const teamWins=[0,0];
+      subs.forEach(({sg,course})=>{
+        const ps=sg.players.map(id=>g.roster.find(p=>p.id===id)).filter(Boolean);
+        const {pts}=playerScores(sg,ps,course,net);
+        const ts=[0,0];
+        ps.forEach(p=>{ if(p.team===0||p.team===1) ts[p.team]+=(pts[p.id]||0); });
+        const winT=ts[0]>ts[1]?0:ts[1]>ts[0]?1:null;
+        if(winT!=null) teamWins[winT]++;
+        g.roster.forEach(p=>{ if(p.team!==0&&p.team!==1) return;
+          const s=ensure(p.id); s.played++;
+          if(winT==null){s.pts+=1;s.draw++;}
+          else if(p.team===winT){s.pts+=3;s.win++;}
+          else s.loss++; });
+      });
+      const champ=teamWins[0]>teamWins[1]?0:teamWins[1]>teamWins[0]?1:null;
+      if(champ!=null) g.roster.forEach(p=>{ if(p.team===champ&&S[p.id]) S[p.id].pts+=5; });
+      return;
+    }
+    // INDIVIDUEL (amicale ou tournoi individuel) : points par duels + confrontations + bonus
+    const gamePts={};
+    subs.forEach(({sg,course})=>{
+      const ps=sg.players.map(id=>g.roster.find(p=>p.id===id)).filter(Boolean);
+      const {pts,h2h,res}=playerScores(sg,ps,course,net);
+      Object.entries(pts).forEach(([id,pt])=>{
+        const s=ensure(id);s.pts+=pt;s.played++;gamePts[id]=(gamePts[id]||0)+pt;
+        const r=res?.[id];
+        if(r==='W')s.win++;else if(r==='D')s.draw++;else s.loss++;});
+      h2h.forEach(({a,b,res})=>{
+        const key=a<b?`${a}|${b}`:`${b}|${a}`;
+        if(!H[key])H[key]={a:0,b:0,nul:0};
+        const flip=!(a<b);
+        if(res==="nul")H[key].nul++;
+        else if((res==="a")!==flip)H[key].a++;else H[key].b++;
+      });
+    });
+    if(g.rounds){ // tournoi individuel : +5 au meilleur total de la partie
+      const ids=Object.keys(gamePts);
+      if(ids.length){ const mx=Math.max(...ids.map(id=>gamePts[id]));
+        ids.filter(id=>gamePts[id]===mx).forEach(id=>{ if(S[id]) S[id].pts+=5; }); }
+    }
+  });
+  return {S,H};
+}
+
+// Impact d'une partie sur le classement de saison : points gagnés + nouveau total/rang.
+function seasonImpact(g, games, courses){
+  const done=games.filter(x=>x.done);
+  const after=computeStandings(done,courses).S;
+  const before=computeStandings(done.filter(x=>String(x.id)!==String(g.id)),courses).S;
+  const ranking=Object.entries(after).map(([id,s])=>({id,pts:s.pts})).sort((x,y)=>y.pts-x.pts);
+  const rankOf=id=>{const i=ranking.findIndex(r=>String(r.id)===String(id));return i<0?null:i+1;};
+  const ids=[...new Set((g.roster||[]).map(p=>p.id))];
+  const lines=ids.map(id=>{const a=after[id]||{pts:0}, b=before[id]||{pts:0};
+    return {id, gained:Math.round(((a.pts||0)-(b.pts||0))*10)/10, total:a.pts||0, rank:rankOf(id)};
+  }).sort((x,y)=>y.gained-x.gained);
+  return {lines};
+}
+
 function Championship(){
   const {games,members,courses}=useContext(Ctx);
   const done=games.filter(g=>g.done);
-  const stats=useMemo(()=>{
-    const S={}; // id -> {pts,played,win,draw,loss}
-    const ensure=id=>{if(!S[id])S[id]={pts:0,played:0,win:0,draw:0,loss:0};return S[id];};
-    const H={}; // "idA|idB" -> {a,b,nul} du point de vue idA<idB
-    done.forEach(g=>{
-      const net=g.mode==="net";
-      // liste unifiée {sg, course} : tournoi (rounds) ou amicale/partie (subgames)
-      const subs=g.rounds
-        ? g.rounds.flatMap(r=>r.subgames.map(sg=>({sg,course:courses.find(c=>c.id===r.courseId)})))
-        : (g.subgames||[]).map(sg=>({sg,course:courses.find(c=>c.id===g.courseId)}));
-      const gamePts={}; // points accumulés DANS cette partie (pour le bonus tournoi)
-      subs.forEach(({sg,course})=>{
-        const ps=sg.players.map(id=>g.roster.find(p=>p.id===id)).filter(Boolean);
-        const {pts,h2h,res}=playerScores(sg,ps,course,net);
-        Object.entries(pts).forEach(([id,pt])=>{
-          const s=ensure(id);s.pts+=pt;s.played++;gamePts[id]=(gamePts[id]||0)+pt;
-          const r=res?.[id];
-          if(r==='W')s.win++;else if(r==='D')s.draw++;else s.loss++;});
-        h2h.forEach(({a,b,res})=>{
-          const key=a<b?`${a}|${b}`:`${b}|${a}`;
-          if(!H[key])H[key]={a:0,b:0,nul:0};
-          const flip=!(a<b);
-          if(res==="nul")H[key].nul++;
-          else if((res==="a")!==flip)H[key].a++;else H[key].b++;
-        });
-      });
-      // 🏆 BONUS TROPHÉE : +5 au(x) vainqueur(s) d'un TOURNOI (event multi-manches)
-      if(g.rounds){
-        const teamPlay=g.teamNames && g.roster?.some(p=>p.team===0||p.team===1);
-        if(teamPlay){ // Ryder : l'équipe qui marque le plus de points
-          const tt=[0,0];
-          g.roster.forEach(p=>{ if(p.team===0||p.team===1) tt[p.team]+=(gamePts[p.id]||0); });
-          const win=tt[0]>tt[1]?0:tt[1]>tt[0]?1:null;
-          if(win!=null) g.roster.forEach(p=>{ if(p.team===win&&S[p.id]) S[p.id].pts+=5; });
-        } else { // tournoi individuel : meilleur total de la partie
-          const ids=Object.keys(gamePts);
-          if(ids.length){ const mx=Math.max(...ids.map(id=>gamePts[id]));
-            ids.filter(id=>gamePts[id]===mx).forEach(id=>{ if(S[id]) S[id].pts+=5; }); }
-        }
-      }
-    });
-    return {S,H};
-  },[done,courses]);
+  const stats=useMemo(()=>computeStandings(done,courses),[done,courses]);
 
   const rows=members.map(m=>({m,...(stats.S[m.id]||{pts:0,played:0,win:0,draw:0,loss:0})}))
     .map(r=>({...r,avg:r.played?r.pts/r.played:0}));
@@ -1696,6 +1761,8 @@ function GameDetail({g,members,courses,games,setGames,back}){
 
 // Partage des résultats via WhatsApp / SMS / partage natif (gratuit, sans service tiers)
 function ShareResults({g,courses,playerById}){
+  const {games}=useContext(Ctx);
+  const impact=seasonImpact(g,games,courses);
   const buildText=()=>{
     const net=g.mode==="net";
     const isTournament=!!g.rounds;
@@ -1735,6 +1802,12 @@ function ShareResults({g,courses,playerById}){
       const lead=t0>t1?`🏆 ${n0} l'emporte !`:t1>t0?`🏆 ${n1} l'emporte !`:"🤝 Égalité parfaite !";
       t+=`${D}\n${n0}  ${t0} – ${t1}  ${n1}\n${lead}\n`;
     }
+    // 🏅 Impact sur le classement de saison (points gagnés + nouveau total/rang)
+    if(impact.lines.length){
+      t+=`${D}\n🏅 Classement de saison\n`;
+      impact.lines.forEach(l=>{const p=playerById(l.id);
+        t+=`   ${dispName(p)}  +${l.gained} → ${l.total} pts${l.rank?`  #${l.rank}`:""}\n`;});
+    }
     t+=`${D}\n⛳ Du Golf & des Amis`;
     return t.trim();
   };
@@ -1752,6 +1825,23 @@ function ShareResults({g,courses,playerById}){
   };
   return (
     <div style={{marginTop:14}}>
+      {impact.lines.length>0 && (
+        <div style={{...card(T.gold),marginBottom:12}}>
+          <div style={{fontWeight:800,marginBottom:8}}>🏅 Évolution au classement de saison</div>
+          {impact.lines.map((l,i)=>{const p=playerById(l.id);
+            return (<div key={l.id} style={{display:"flex",alignItems:"center",gap:8,
+              padding:"6px 0",borderTop:i?`1px solid ${T.line}`:"none"}}>
+              <span style={{width:22,textAlign:"center",fontWeight:800,
+                color:i===0?T.gold:T.dim}}>{i===0?"🥇":`#${l.rank||"-"}`}</span>
+              <span style={{flex:1,fontWeight:700}}>{dispName(p)}</span>
+              <span style={{color:T.accent,fontWeight:800,fontSize:13}}>+{l.gained}</span>
+              <span style={{color:T.dim,fontSize:12}}>→ {l.total} pts</span>
+              <span style={{color:T.gold,fontSize:11,width:34,textAlign:"right"}}>#{l.rank||"-"}</span>
+            </div>);})}
+          <div style={{fontSize:10,color:T.dim,marginTop:6}}>
+            Points gagnés cette partie · total et rang au classement général.</div>
+        </div>
+      )}
       <button onClick={share} style={{...addBtn,background:"#25D366",color:"#062b14"}}>
         💬 Partager les résultats sur WhatsApp</button>
       {waLink&&<button onClick={toGroup} style={{...delBtn,width:"100%",marginTop:8,
