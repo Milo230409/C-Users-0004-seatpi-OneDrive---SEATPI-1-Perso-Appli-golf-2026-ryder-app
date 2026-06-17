@@ -357,13 +357,13 @@ function WhoAreYou({members,loaded,cloud,onPick,setMembers}){
   const [nm,setNm]=useState("");
   // on n'affiche QUE les vrais profils : un invité jamais nommé n'est pas archivé/listé
   const realName=p=>p.name&&p.name.trim()&&p.name.trim().toLowerCase()!=="invité";
-  const hasIndex=p=>p.index!=null&&!Number.isNaN(parseFloat(p.index));
   const list=members.filter(realName).sort((a,b)=>dispName(a).localeCompare(dispName(b)));
 
   const enterAs=(p)=>onPick({id:p.id,name:p.name,nick:p.nick,email:p.email,
     mobile:p.mobile,index:p.index,player:true});
-  // revenir : si on connaît son index → "MDP soft" (confirme l'index) ; sinon → profil à compléter
-  const choose=(p)=>{ if(hasIndex(p)) setVerifyFor(p); else setProfileFor(p); };
+  // 1re connexion (profil pas encore complété) → on remplit sa fiche une fois pour toutes.
+  // Connexions suivantes → "MDP soft" : surnom (affiché) + index de la dernière connexion.
+  const choose=(p)=>{ if(p.profileDone) setVerifyFor(p); else setProfileFor(p); };
   // MDP soft validé : met à jour l'index (qui fait foi la prochaine fois) puis entre
   const softOk=(p,newIndex)=>{
     const updated={...p,index:newIndex,profileDone:true};
@@ -374,7 +374,11 @@ function WhoAreYou({members,loaded,cloud,onPick,setMembers}){
   if(verifyFor) return <SoftLogin player={verifyFor}
     onOk={(ni)=>softOk(verifyFor,ni)} onCancel={()=>setVerifyFor(null)}/>;
   if(profileFor) return <ProfileForm player={profileFor} cloud={cloud}
-    onDone={(updated)=>{ enterAs(updated); }}
+    onDone={(updated)=>{
+      // on mémorise la fiche complétée (une fois pour toutes) avant d'entrer
+      if(setMembers){ const exists=members.some(m=>m.id===updated.id);
+        setMembers(exists?members.map(m=>m.id===updated.id?updated:m):[...members,updated]); }
+      enterAs(updated); }}
     onCancel={()=>setProfileFor(null)}/>;
 
   return (
@@ -1309,28 +1313,43 @@ function CourseCard({c,upd,del}){
           onChange={e=>upd(c.id,"par",+e.target.value)} style={inp}/></Field>
       </div>
       <div style={{fontSize:11,color:T.dim,margin:"10px 0 4px",fontWeight:700}}>
-        DÉPARTS (couleur · CR/SSS · Slope · Par)</div>
-      {(c.tees||[]).map((t,i)=>(
-        <div key={i} style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
-          <span style={{width:12,height:12,borderRadius:3,background:teeDot(t.name),
-            border:`1px solid ${T.line}`,flexShrink:0}}/>
-          <select value={t.name} onChange={e=>updTee(i,"name",e.target.value)}
-            style={{...inp,marginTop:0,width:90,padding:"6px"}}>
-            {[...new Set([...preset,t.name])].map(p=><option key={p}>{p}</option>)}</select>
-          <input type="number" step="0.1" value={t.cr} placeholder="CR"
-            onChange={e=>updTee(i,"cr",parseFloat(e.target.value))}
-            style={{...inp,marginTop:0,padding:"6px",textAlign:"center"}}/>
-          <input type="number" value={t.slope} placeholder="Slope"
-            onChange={e=>updTee(i,"slope",+e.target.value)}
-            style={{...inp,marginTop:0,padding:"6px",textAlign:"center"}}/>
-          <input type="number" value={t.par} placeholder="Par"
-            onChange={e=>updTee(i,"par",+e.target.value)}
-            style={{...inp,marginTop:0,padding:"6px",width:44,textAlign:"center"}}/>
-          <input type="number" value={t.length||""} placeholder="m"
-            onChange={e=>updTee(i,"length",+e.target.value||undefined)}
-            style={{...inp,marginTop:0,padding:"6px",width:56,textAlign:"center"}}/>
-          <button onClick={()=>delTee(i)} style={{...delBtn,padding:"4px 8px"}}>✕</button>
-        </div>))}
+        DÉPARTS — saisis surtout le <span style={{color:T.gold}}>SLOPE</span> de chaque couleur
+        (le SSS/CR est optionnel)</div>
+      {(()=>{const miniLab={fontSize:9,color:T.dim,fontWeight:700,letterSpacing:.3,
+        marginBottom:2,textAlign:"center"};
+       const cell={...inp,marginTop:0,padding:"7px 4px",textAlign:"center",width:"100%"};
+       return (c.tees||[]).map((t,i)=>(
+        <div key={i} style={{border:`1px solid ${T.line}`,borderRadius:10,
+          padding:"8px",marginBottom:8}}>
+          <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:7}}>
+            <span style={{width:14,height:14,borderRadius:3,background:teeDot(t.name),
+              border:`1px solid ${T.line}`,flexShrink:0}}/>
+            <select value={t.name} onChange={e=>updTee(i,"name",e.target.value)}
+              style={{...inp,marginTop:0,flex:1,padding:"7px"}}>
+              {[...new Set([...preset,t.name])].map(p=><option key={p}>{p}</option>)}</select>
+            <button onClick={()=>delTee(i)} style={{...delBtn,padding:"6px 10px"}}>✕</button>
+          </div>
+          <div style={{display:"flex",gap:6,alignItems:"flex-end"}}>
+            <div style={{flex:1.4}}>
+              <div style={{...miniLab,color:T.gold}}>SLOPE</div>
+              <input type="number" inputMode="numeric" value={t.slope??""} placeholder="ex: 134"
+                onChange={e=>updTee(i,"slope",e.target.value===""?undefined:+e.target.value)}
+                style={{...cell,borderColor:T.gold,fontWeight:800}}/></div>
+            <div style={{flex:1.2}}>
+              <div style={miniLab}>SSS/CR (opt.)</div>
+              <input type="number" step="0.1" inputMode="decimal" value={t.cr??""} placeholder="—"
+                onChange={e=>updTee(i,"cr",e.target.value===""?undefined:parseFloat(e.target.value))}
+                style={cell}/></div>
+            <div style={{flex:.8}}>
+              <div style={miniLab}>PAR</div>
+              <input type="number" inputMode="numeric" value={t.par??""} placeholder="72"
+                onChange={e=>updTee(i,"par",+e.target.value)} style={cell}/></div>
+            <div style={{flex:1}}>
+              <div style={miniLab}>MÈTRES</div>
+              <input type="number" inputMode="numeric" value={t.length||""} placeholder="—"
+                onChange={e=>updTee(i,"length",+e.target.value||undefined)} style={cell}/></div>
+          </div>
+        </div>));})()}
       <button onClick={addTee} style={{...delBtn,width:"100%",padding:"8px",
         color:T.accent,borderColor:T.accent}}>+ Ajouter un départ</button>
 

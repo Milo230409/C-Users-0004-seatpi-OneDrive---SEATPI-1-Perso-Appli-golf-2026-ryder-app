@@ -1,21 +1,42 @@
 -- ============================================================
---  Du Golf & des Amis — Amorçage de la liste "Je suis…"
---  8 joueurs de départ, SANS données perso : chacun complétera
---  son profil (prénom, surnom, mobile, email, index, notif) à sa
---  première connexion (formulaire obligatoire dans l'app).
---  À coller dans Supabase → SQL Editor → Run (après open_access.sql).
+--  Du Golf & des Amis — Liste "Qui es-tu ?" : tes 8 joueurs
+--  ------------------------------------------------------------
+--  But : pré-créer les 8 noms qui s'affichent sur l'accueil.
+--  Chaque joueur, à sa PREMIÈRE connexion, remplit sa fiche une
+--  fois pour toutes (surnom, index, mobile, email…).
+--  Ensuite, sign-in = SURNOM (affiché, on tape sur son nom) +
+--  INDEX de la dernière connexion (le "mot de passe soft").
+--  Il pourra saisir un index différent s'il a progressé : ce
+--  nouvel index devient la référence pour la fois suivante.
+--
+--  ORDRE à respecter dans Supabase → SQL Editor → Run :
+--    1) schema.sql        (crée les tables)
+--    2) open_access.sql   (accès du groupe, sans mot de passe)
+--    3) seed_courses.sql  (les 22 parcours)  [optionnel]
+--    4) seed_players.sql  (CE fichier)
+--
+--  👉 Remplace juste les 8 prénoms ci-dessous par ceux à
+--     afficher sur l'accueil. NE METS PAS l'index ici : il est
+--     saisi dans l'app à la 1re connexion (profileDone reste false).
+--  Idempotent : on repart d'une liste propre à chaque exécution.
 -- ============================================================
 
-insert into public.players (data) values
-  ('{"id":"seed-phil",     "name":"Phil",     "nick":"",        "index":0, "profileDone":false}'::jsonb),
-  ('{"id":"seed-rich",     "name":"Rich",     "nick":"",        "index":0, "profileDone":false}'::jsonb),
-  ('{"id":"seed-ro",       "name":"Ro",       "nick":"",        "index":0, "profileDone":false}'::jsonb),
-  ('{"id":"seed-lena",     "name":"le Na",    "nick":"",        "index":0, "profileDone":false}'::jsonb),
-  ('{"id":"seed-jpb",      "name":"jpb",      "nick":"",        "index":0, "profileDone":false}'::jsonb),
-  ('{"id":"seed-jpf",      "name":"jpf",      "nick":"",        "index":0, "profileDone":false}'::jsonb),
-  ('{"id":"seed-thomas",   "name":"Thomas",   "nick":"",        "index":0, "profileDone":false}'::jsonb),
-  ('{"id":"seed-thomasfi", "name":"thomasfi", "nick":"",        "index":0, "profileDone":false}'::jsonb);
+-- On efface les anciens joueurs "seed" pour éviter les doublons
+-- (ne touche pas aux joueurs déjà passés en profil complété).
+delete from public.players
+where (data->>'profileDone') = 'false';
 
--- Vérif
-select data->>'name' as nom, data->>'profileDone' as profil_complet
-from public.players order by nom;
+insert into public.players (data) values
+  ('{"id":"seed-1","name":"Philippe",    "nick":"", "profileDone":false}'::jsonb),
+  ('{"id":"seed-2","name":"Romain",      "nick":"", "profileDone":false}'::jsonb),
+  ('{"id":"seed-3","name":"Richard",     "nick":"", "profileDone":false}'::jsonb),
+  ('{"id":"seed-4","name":"Jean-Paul",   "nick":"", "profileDone":false}'::jsonb),
+  ('{"id":"seed-5","name":"Jean-Pierre", "nick":"", "profileDone":false}'::jsonb),
+  ('{"id":"seed-6","name":"Thomas",      "nick":"", "profileDone":false}'::jsonb),
+  ('{"id":"seed-7","name":"Nico",        "nick":"", "profileDone":false}'::jsonb),
+  ('{"id":"seed-8","name":"Joueur 8",    "nick":"", "profileDone":false}'::jsonb);
+
+-- Vérif : la liste qui s'affichera sur l'accueil
+select data->>'name' as nom_affiche, data->>'profileDone' as profil_complet
+from public.players
+order by nom_affiche;
