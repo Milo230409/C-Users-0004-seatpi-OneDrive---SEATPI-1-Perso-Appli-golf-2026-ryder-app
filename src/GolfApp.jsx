@@ -11,7 +11,11 @@ import { loadGroup, upsertEntity, deleteEntity, loadMyProfile, saveMyProfile, su
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.7 · rejoindre"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.8 · en dur"; // ← change à chaque mise en prod pour vérifier
+// Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
+// Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
+const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
+const DEFAULT_WA="https://chat.whatsapp.com/JRErxQfHbNkJ4xFutnjklk";
 // Qui peut ouvrir le menu Réglages (clé API, lien WhatsApp…). Insensible à la casse.
 // Ajoute ici les prénoms/surnoms autorisés.
 const ADMIN_KEYS=["philippe","phil"];
@@ -112,7 +116,7 @@ function countNetBirdies(netHoles,course){
 
 /* ===== API GolfCourseAPI : recherche + détails (repli manuel si CORS) ===== */
 const GolfAPI={
-  key(){ return DB.lget("apiKey",""); },
+  key(){ return DB.lget("apiKey",DEFAULT_API_KEY); },
   async search(q){
     const k=this.key();
     if(!k) throw {kind:"nokey"};
@@ -657,7 +661,7 @@ function Home({setTab,staleCount,refreshStale,openGame}){
   const ongoing=games.filter(g=>!g.done);
   const done=games.filter(g=>g.done);
   const prenom=dispName(user)||"toi"; // surnom complet (ex: "passe partout"), plus tronqué
-  const waLink=DB.lget("waGroup","");
+  const waLink=DB.lget("waGroup",DEFAULT_WA);
   // partie EN COURS où je suis inscrit → on propose de la rejoindre
   const [hideJoin,setHideJoin]=useState(false);
   const myLive=ongoing.find(g=>(g.roster||[]).some(p=>String(p.id)===String(user?.id)));
@@ -1353,10 +1357,10 @@ function PlayersTab(){
 
 function SettingsTab(){
   const {user,setUser}=useContext(Ctx);
-  const [apiKey,setApiKey]=useState(DB.lget("apiKey",""));
+  const [apiKey,setApiKey]=useState(DB.lget("apiKey",DEFAULT_API_KEY));
   const [saved,setSaved]=useState(false);
   const [diag,setDiag]=useState("");
-  const [wa,setWa]=useState(DB.lget("waGroup",""));
+  const [wa,setWa]=useState(DB.lget("waGroup",DEFAULT_WA));
   const [waSaved,setWaSaved]=useState(false);
   // mon profil (compte connecté)
   const [prof,setProf]=useState({name:user?.name||"",nick:user?.nick||"",
@@ -1842,7 +1846,7 @@ function ShareResults({g,courses,playerById}){
     // repli : ouvre WhatsApp avec le texte pré-rempli
     window.open(`https://wa.me/?text=${encodeURIComponent(text)}`,"_blank");
   };
-  const waLink=DB.lget("waGroup","");
+  const waLink=DB.lget("waGroup",DEFAULT_WA);
   const toGroup=()=>{
     // copie le résultat puis ouvre le groupe WhatsApp pour le coller
     try{navigator.clipboard?.writeText(buildText());}catch(e){}
