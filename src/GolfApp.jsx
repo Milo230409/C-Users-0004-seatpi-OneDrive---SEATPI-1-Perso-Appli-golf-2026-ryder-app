@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, loadMyProfile, saveMyProfile, su
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.10 · faq parcours"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.11 · membres"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -262,6 +262,17 @@ export default function App(){
     return ()=>{alive=false;unsub&&unsub();};
   },[]);
 
+  // ---- Ménage auto : on supprime les parties NON clôturées de plus d'1 semaine ----
+  useEffect(()=>{
+    const WEEK=7*24*3600*1000, now=Date.now();
+    const stale=games.filter(g=>!g.done && g.created && (now-g.created)>WEEK);
+    if(stale.length){
+      const ids=new Set(stale.map(g=>g.id));
+      setGames(games.filter(g=>!ids.has(g.id)));
+      if(cloud) stale.forEach(g=>{ if(g._row) deleteEntity("games",g._row); });
+    }
+  },[games,cloud]);
+
   // ---- Persistance locale (toujours, pour le mode hors-ligne / invité) ----
   useEffect(()=>{ DB.lset("user",user); },[user]);
   useEffect(()=>{ if(!cloud) DB.lset("members",members); },[members,cloud]);
@@ -391,6 +402,27 @@ function WhoAreYou({members,loaded,cloud,onPick,setMembers}){
   // on n'affiche QUE les vrais profils : un invité jamais nommé n'est pas archivé/listé
   const realName=p=>p.name&&p.name.trim()&&p.name.trim().toLowerCase()!=="invité";
   const list=members.filter(realName).sort((a,b)=>dispName(a).localeCompare(dispName(b)));
+  // Membres G&A = les joueurs préchargés (toujours en haut) ; les autres en dessous.
+  const isMember=p=>p.member===true||/^seed-/.test(String(p.id));
+  const founders=list.filter(isMember), others=list.filter(p=>!isMember(p));
+  const playerBtn=p=>(
+    <button key={p.id} onClick={()=>choose(p)} style={{display:"flex",alignItems:"center",
+      gap:12,padding:"14px 16px",borderRadius:14,border:`1.5px solid ${T.line}`,
+      background:T.panel,cursor:"pointer",textAlign:"left",color:T.text}}>
+      <span style={{width:38,height:38,borderRadius:"50%",background:T.accent,
+        color:T.ink,display:"flex",alignItems:"center",justifyContent:"center",
+        fontWeight:800,fontSize:16,flexShrink:0}}>
+        {(dispName(p)[0]||"?").toUpperCase()}</span>
+      <div style={{minWidth:0,flex:1}}>
+        <div style={{fontWeight:800,fontSize:16,color:T.text}}>{dispName(p)}</div>
+        {p.name&&p.nick&&<div style={{fontSize:11,color:T.dim}}>{p.name}</div>}
+      </div>
+      {!p.profileDone&&<span style={{fontSize:10,color:T.gold,
+        border:`1px solid ${T.gold}55`,borderRadius:999,padding:"2px 8px"}}>
+        profil à compléter</span>}
+    </button>);
+  const sectionLabel={fontSize:11,fontWeight:800,letterSpacing:1,textTransform:"uppercase",
+    color:T.dim,margin:"14px 0 6px",textAlign:"left"};
 
   const enterAs=(p)=>onPick({id:p.id,name:p.name,nick:p.nick,email:p.email,
     mobile:p.mobile,index:p.index,player:true});
@@ -437,24 +469,14 @@ function WhoAreYou({members,loaded,cloud,onPick,setMembers}){
         padding:"16px",background:T.panel,borderRadius:12,textAlign:"left",lineHeight:1.5}}>
         Aucun joueur enregistré pour l'instant. Ajoute-toi ci-dessous.</div>}
 
-      <div style={{display:"flex",flexDirection:"column",gap:8,marginTop:4}}>
-        {loaded && list.map(p=>(
-          <button key={p.id} onClick={()=>choose(p)} style={{display:"flex",alignItems:"center",
-            gap:12,padding:"14px 16px",borderRadius:14,border:`1.5px solid ${T.line}`,
-            background:T.panel,cursor:"pointer",textAlign:"left",color:T.text}}>
-            <span style={{width:38,height:38,borderRadius:"50%",background:T.accent,
-              color:T.ink,display:"flex",alignItems:"center",justifyContent:"center",
-              fontWeight:800,fontSize:16,flexShrink:0}}>
-              {(dispName(p)[0]||"?").toUpperCase()}</span>
-            <div style={{minWidth:0,flex:1}}>
-              <div style={{fontWeight:800,fontSize:16,color:T.text}}>{dispName(p)}</div>
-              {p.name&&p.nick&&<div style={{fontSize:11,color:T.dim}}>{p.name}</div>}
-            </div>
-            {!p.profileDone&&<span style={{fontSize:10,color:T.gold,
-              border:`1px solid ${T.gold}55`,borderRadius:999,padding:"2px 8px"}}>
-              profil à compléter</span>}
-          </button>))}
-      </div>
+      {loaded && founders.length>0 && <>
+        <div style={sectionLabel}>★ Membres G&A</div>
+        <div style={{display:"flex",flexDirection:"column",gap:8}}>{founders.map(playerBtn)}</div>
+      </>}
+      {loaded && others.length>0 && <>
+        <div style={sectionLabel}>Autres joueurs</div>
+        <div style={{display:"flex",flexDirection:"column",gap:8}}>{others.map(playerBtn)}</div>
+      </>}
 
       {loaded && !adding && <button onClick={()=>setAdding(true)}
         style={{...delBtn,width:"100%",marginTop:12,padding:"12px",fontSize:13,
@@ -1601,13 +1623,17 @@ function HoleEditor({c,upd}){
 }
 
 function History({openId,onConsumeOpen}){
-  const {games,setGames,members,courses,removeGame}=useContext(Ctx);
+  const {games,setGames,members,courses,removeGame,admin}=useContext(Ctx);
   const [open,setOpen]=useState(openId||null);
   useEffect(()=>{ if(openId){ setOpen(openId); onConsumeOpen&&onConsumeOpen(); } },[openId]);
+  const isMember=p=>p.member===true||/^seed-/.test(String(p.id));
   const delGame=(id,e)=>{e.stopPropagation();
-    const g=games.find(x=>x.id===id);
-    if(g&&confirm("Supprimer définitivement cette partie de l'historique ?"))
-      removeGame(g);};
+    const g=games.find(x=>x.id===id); if(!g) return;
+    // une partie VALIDÉE contenant des membres = protégée : seul l'organisateur peut la supprimer
+    if(g.done && (g.roster||[]).some(isMember) && !admin){
+      alert("🔒 Cette partie validée fait partie du championnat : seul l'organisateur peut la supprimer.");
+      return;}
+    if(confirm("Supprimer définitivement cette partie de l'historique ?")) removeGame(g);};
   if(!games.length) return <Empty text="Aucune partie. Crée-en une depuis l'accueil."/>;
   if(open){const g=games.find(x=>x.id===open);
     if(g) return <GameDetail g={g} members={members} courses={courses} games={games}
@@ -2693,15 +2719,15 @@ function playerScores(sg,ps,course,net){
 }
 
 const SEED_MEMBERS=[
-  {id:"seed-1",name:"Philippe",nick:"",profileDone:false},
-  {id:"seed-2",name:"Romain",nick:"",profileDone:false},
-  {id:"seed-3",name:"Richard",nick:"",profileDone:false},
-  {id:"seed-4",name:"Jean-Paul",nick:"",profileDone:false},
-  {id:"seed-5",name:"Jean-Pierre",nick:"",profileDone:false},
-  {id:"seed-6",name:"Thomas",nick:"",profileDone:false},
-  {id:"seed-7",name:"Nico",nick:"",profileDone:false},
-  {id:"seed-8",name:"Thomas F.",nick:"",profileDone:false},
-  {id:"seed-9",name:"Mitch",nick:"",profileDone:false},
+  {id:"seed-1",name:"Philippe",nick:"",member:true,profileDone:false},
+  {id:"seed-2",name:"Romain",nick:"",member:true,profileDone:false},
+  {id:"seed-3",name:"Richard",nick:"",member:true,profileDone:false},
+  {id:"seed-4",name:"Jean-Paul",nick:"",member:true,profileDone:false},
+  {id:"seed-5",name:"Jean-Pierre",nick:"",member:true,profileDone:false},
+  {id:"seed-6",name:"Thomas",nick:"",member:true,profileDone:false},
+  {id:"seed-7",name:"Nico",nick:"",member:true,profileDone:false},
+  {id:"seed-8",name:"Thomas F.",nick:"",member:true,profileDone:false},
+  {id:"seed-9",name:"Mitch",nick:"",member:true,profileDone:false},
 ];
 // PARCOURS RÉELS (départ jaune) sanctuarisés dans le code : par+HCP+longueur par trou,
 // + longueur totale. Filet de secours si le cloud est indisponible.

@@ -27,15 +27,15 @@ delete from public.players
 where (data->>'profileDone') = 'false';
 
 insert into public.players (data) values
-  ('{"id":"seed-1","name":"Philippe",    "nick":"", "profileDone":false}'::jsonb),
-  ('{"id":"seed-2","name":"Romain",      "nick":"", "profileDone":false}'::jsonb),
-  ('{"id":"seed-3","name":"Richard",     "nick":"", "profileDone":false}'::jsonb),
-  ('{"id":"seed-4","name":"Jean-Paul",   "nick":"", "profileDone":false}'::jsonb),
-  ('{"id":"seed-5","name":"Jean-Pierre", "nick":"", "profileDone":false}'::jsonb),
-  ('{"id":"seed-6","name":"Thomas",      "nick":"", "profileDone":false}'::jsonb),
-  ('{"id":"seed-7","name":"Nico",        "nick":"", "profileDone":false}'::jsonb),
-  ('{"id":"seed-8","name":"Thomas F.",   "nick":"", "profileDone":false}'::jsonb),
-  ('{"id":"seed-9","name":"Mitch",       "nick":"", "profileDone":false}'::jsonb);
+  ('{"id":"seed-1","name":"Philippe",    "nick":"", "member":true,"profileDone":false}'::jsonb),
+  ('{"id":"seed-2","name":"Romain",      "nick":"", "member":true,"profileDone":false}'::jsonb),
+  ('{"id":"seed-3","name":"Richard",     "nick":"", "member":true,"profileDone":false}'::jsonb),
+  ('{"id":"seed-4","name":"Jean-Paul",   "nick":"", "member":true,"profileDone":false}'::jsonb),
+  ('{"id":"seed-5","name":"Jean-Pierre", "nick":"", "member":true,"profileDone":false}'::jsonb),
+  ('{"id":"seed-6","name":"Thomas",      "nick":"", "member":true,"profileDone":false}'::jsonb),
+  ('{"id":"seed-7","name":"Nico",        "nick":"", "member":true,"profileDone":false}'::jsonb),
+  ('{"id":"seed-8","name":"Thomas F.",   "nick":"", "member":true,"profileDone":false}'::jsonb),
+  ('{"id":"seed-9","name":"Mitch",       "nick":"", "member":true,"profileDone":false}'::jsonb);
 
 -- Vérif : la liste qui s'affichera sur l'accueil
 select data->>'name' as nom_affiche, data->>'profileDone' as profil_complet
