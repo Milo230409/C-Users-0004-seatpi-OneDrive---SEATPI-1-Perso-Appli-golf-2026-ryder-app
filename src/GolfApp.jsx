@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, loadMyProfile, saveMyProfile, su
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.8 · en dur"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.9 · accueil"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -696,8 +696,8 @@ function Home({setTab,staleCount,refreshStale,openGame}){
         <div><div style={{fontWeight:800}}>{staleCount} parcours à actualiser</div>
           <div style={{fontSize:11,color:T.dim}}>Données de plus de 6 mois — tape pour mettre à jour</div></div></div>}
 
-      {/* Deux cartes d'action principales, compactes */}
-      <div style={{display:"flex",gap:12}}>
+      {/* Deux cartes d'action principales */}
+      <div style={{display:"flex",gap:12,marginTop:4}}>
         <ActionCard color={T.accent} icon="⛳" title="Partie amicale"
           sub="2 à 4 joueurs · entre potes"
           onClick={()=>{DB.lset("newType","simple");setTab("new");}}/>
@@ -705,15 +705,6 @@ function Home({setTab,staleCount,refreshStale,openGame}){
           sub="5+ joueurs · équipes & manches"
           onClick={()=>{DB.lset("newType","event");setTab("new");}}/>
       </div>
-
-      {/* Gros bouton WhatsApp visible */}
-      <button onClick={goWa}
-        style={{width:"100%",marginTop:12,padding:"14px",borderRadius:16,border:"none",
-          cursor:"pointer",background:"#25D366",color:"#06210f",fontWeight:800,fontSize:15,
-          display:"flex",alignItems:"center",justifyContent:"center",gap:10,
-          boxShadow:"0 6px 22px #25D36633"}}>
-        <span style={{fontSize:20}}>💬</span>
-        {waLink?"Ouvrir le groupe WhatsApp":"Configurer le groupe WhatsApp"}</button>
 
       {ongoing.length>0&&<><Section>En cours</Section>
         {ongoing.map(g=><div key={g.id} onClick={()=>setTab("history")}
@@ -785,14 +776,14 @@ function CrestLogo({size=92}){
 }
 // tuile de raccourci (grille 2 colonnes)
 function Tile({color,icon,title,sub,onClick}){
-  return (<div onClick={onClick} style={{borderRadius:18,padding:"16px 14px",
+  return (<div onClick={onClick} style={{borderRadius:18,padding:"20px 16px",minHeight:78,
     cursor:"pointer",border:`1.5px solid ${color}55`,
     background:`linear-gradient(160deg, ${color}1c 0%, ${T.panel} 70%)`,
     display:"flex",alignItems:"center",gap:12}}>
-    <span style={{fontSize:28,lineHeight:1}}>{icon}</span>
+    <span style={{fontSize:30,lineHeight:1,flexShrink:0}}>{icon}</span>
     <div style={{minWidth:0}}>
-      <div style={{fontWeight:800,fontSize:14}}>{title}</div>
-      <div style={{fontSize:10,color:T.dim,lineHeight:1.3,
+      <div style={{fontWeight:800,fontSize:15}}>{title}</div>
+      <div style={{fontSize:11,color:T.dim,lineHeight:1.35,marginTop:2,
         overflow:"hidden",textOverflow:"ellipsis"}}>{sub}</div></div></div>);
 }
 function BigCard({color,icon,title,sub,onClick}){
