@@ -91,7 +91,11 @@ create trigger on_auth_user_created
 
 -- ============================================================
 --  Realtime (optionnel mais recommandé : MAJ live entre téléphones)
+--  Rejouable sans erreur : on ignore si la table est déjà publiée.
 -- ============================================================
-alter publication supabase_realtime add table public.games;
-alter publication supabase_realtime add table public.players;
-alter publication supabase_realtime add table public.courses;
+do $$
+begin
+  begin alter publication supabase_realtime add table public.games;   exception when duplicate_object then null; end;
+  begin alter publication supabase_realtime add table public.players; exception when duplicate_object then null; end;
+  begin alter publication supabase_realtime add table public.courses; exception when duplicate_object then null; end;
+end $$;
