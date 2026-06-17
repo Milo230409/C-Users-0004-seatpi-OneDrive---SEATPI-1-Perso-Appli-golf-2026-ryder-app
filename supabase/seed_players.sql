@@ -34,7 +34,8 @@ insert into public.players (data) values
   ('{"id":"seed-5","name":"Jean-Pierre", "nick":"", "profileDone":false}'::jsonb),
   ('{"id":"seed-6","name":"Thomas",      "nick":"", "profileDone":false}'::jsonb),
   ('{"id":"seed-7","name":"Nico",        "nick":"", "profileDone":false}'::jsonb),
-  ('{"id":"seed-8","name":"Thomas F.",   "nick":"", "profileDone":false}'::jsonb);
+  ('{"id":"seed-8","name":"Thomas F.",   "nick":"", "profileDone":false}'::jsonb),
+  ('{"id":"seed-9","name":"Mitch",       "nick":"", "profileDone":false}'::jsonb);
 
 -- Vérif : la liste qui s'affichera sur l'accueil
 select data->>'name' as nom_affiche, data->>'profileDone' as profil_complet

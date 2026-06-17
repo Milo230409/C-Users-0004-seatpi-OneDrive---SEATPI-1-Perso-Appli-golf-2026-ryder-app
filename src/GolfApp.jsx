@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, loadMyProfile, saveMyProfile, su
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.2 · litiges"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.3 · lisible"; // ← change à chaque mise en prod pour vérifier
 // Qui peut ouvrir le menu Réglages (clé API, lien WhatsApp…). Insensible à la casse.
 // Ajoute ici les prénoms/surnoms autorisés.
 const ADMIN_KEYS=["philippe","phil"];
@@ -434,13 +434,13 @@ function WhoAreYou({members,loaded,cloud,onPick,setMembers}){
         {loaded && list.map(p=>(
           <button key={p.id} onClick={()=>choose(p)} style={{display:"flex",alignItems:"center",
             gap:12,padding:"14px 16px",borderRadius:14,border:`1.5px solid ${T.line}`,
-            background:T.panel,cursor:"pointer",textAlign:"left"}}>
+            background:T.panel,cursor:"pointer",textAlign:"left",color:T.text}}>
             <span style={{width:38,height:38,borderRadius:"50%",background:T.accent,
               color:T.ink,display:"flex",alignItems:"center",justifyContent:"center",
               fontWeight:800,fontSize:16,flexShrink:0}}>
               {(dispName(p)[0]||"?").toUpperCase()}</span>
             <div style={{minWidth:0,flex:1}}>
-              <div style={{fontWeight:800,fontSize:15}}>{dispName(p)}</div>
+              <div style={{fontWeight:800,fontSize:16,color:T.text}}>{dispName(p)}</div>
               {p.name&&p.nick&&<div style={{fontSize:11,color:T.dim}}>{p.name}</div>}
             </div>
             {!p.profileDone&&<span style={{fontSize:10,color:T.gold,
