@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, loadMyProfile, saveMyProfile, su
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.1 · 3 joueurs"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.2 · litiges"; // ← change à chaque mise en prod pour vérifier
 // Qui peut ouvrir le menu Réglages (clé API, lien WhatsApp…). Insensible à la casse.
 // Ajoute ici les prénoms/surnoms autorisés.
 const ADMIN_KEYS=["philippe","phil"];
@@ -2375,49 +2375,32 @@ function computeSub(sg,ps,course,net){
     return {pts,summary:rank.map(r=>`${r.name} ${r.pts}`).join(" · "),winner:rank[0]?.name};
   }
   if(f==="chouette"){
-    const pts={};ps.forEach(p=>pts[p.id]=0);
-    // === MODE DIFFÉRENTIEL (match play à 3) : 3 DUELS par paire ===
-    // Chaque paire reçoit ses coups CORRECTS sur les trous durs (ex : J2 rend 7 à J3 sur
-    // HCP 1→7). Chaque duel vaut 2 pts (1/1 si égalité) → 6 pts/trou. Reproduit 4/2/0,
-    // 3/3/0, 4/1/1 et 2/2/2, mais avec le bon handicap par paire.
-    // LITIGE = aucun gagnant net du trou (cycle J1>J2>J3>J1, ou triple égalité) → 2/2/2.
-    if(sg.hcpRelative && ps.length===3){
-      const sFor=(p,q)=>strokesPerHole(effChp(p,[p,q],course,true),course.si);
-      const pairs=[[0,1],[0,2],[1,2]]; let litiges=0;
-      for(let h=0;h<18;h++){
-        const g=ps.map(p=>sg.scores?.[p.id]?.[h]);
-        if(g.some(x=>x==null)) continue;
-        const hp={};ps.forEach(p=>hp[p.id]=0);
-        pairs.forEach(([ia,ic])=>{const pa=ps[ia],pc=ps[ic];
-          const na=g[ia]-sFor(pa,pc)[h], nc=g[ic]-sFor(pc,pa)[h];
-          if(na<nc) hp[pa.id]+=2; else if(nc<na) hp[pc.id]+=2;
-          else { hp[pa.id]+=1; hp[pc.id]+=1; }});
-        ps.forEach(p=>pts[p.id]+=hp[p.id]);
-        if(Math.max(...ps.map(p=>hp[p.id]))<4) litiges++; // pas de vainqueur net du trou
-      }
-      const rank=ps.map(p=>({name:dispName(p),pts:pts[p.id]})).sort((x,y)=>y.pts-x.pts);
-      const note=litiges?`  ⚖️ ${litiges} litige(s) — points partagés`:"";
-      return {pts,summary:rank.map(r=>`${r.name} ${r.pts}`).join(" · ")+note,
-        winner:rank[0]?.name,litiges};
-    }
-    // === MODE INTÉGRAL : 6 pts/trou, un seul net par joueur, classement des 3 nets ===
+    // 6 pts/trou. UN seul net par joueur (= brut - coups rendus ; relatifs au plus bas
+    // joueur si la case "match play" est cochée). Classement des 3 nets :
+    //   3 distincts → 4/2/0 · 3 égaux → 2/2/2 · égalité 1re → 3/3/0 · égalité 2e → 4/1/1.
+    // On COMPTE et SIGNALE les LITIGES = trous à égalité (points partagés). Comme demandé,
+    // on garde une seule partie à 3 : un joueur peut être desservi (duel J2↔J3), mais c'est
+    // notifié à chaque trou litigieux.
+    const pts={};ps.forEach(p=>pts[p.id]=0); let litiges=0;
     for(let h=0;h<18;h++){
       const trio=ps.map(p=>({id:p.id,s:nets[p.id][h]}));
       if(trio.some(x=>x.s==null)) continue;
       const sorted=[...trio].sort((a,b)=>a.s-b.s);
       const [a,b,c]=sorted; // a meilleur net (plus petit), c le pire
-      if(a.s<b.s && b.s<c.s){            // 3 nets distincts
+      if(a.s<b.s && b.s<c.s){            // 3 nets distincts → pas de litige
         pts[a.id]+=4; pts[b.id]+=2; pts[c.id]+=0;
       } else if(a.s===b.s && b.s===c.s){ // les 3 égaux
-        pts[a.id]+=2; pts[b.id]+=2; pts[c.id]+=2;
+        pts[a.id]+=2; pts[b.id]+=2; pts[c.id]+=2; litiges++;
       } else if(a.s===b.s && b.s<c.s){   // égalité en tête
-        pts[a.id]+=3; pts[b.id]+=3; pts[c.id]+=0;
+        pts[a.id]+=3; pts[b.id]+=3; pts[c.id]+=0; litiges++;
       } else if(a.s<b.s && b.s===c.s){   // gagnant seul + égalité 2e/3e
-        pts[a.id]+=4; pts[b.id]+=1; pts[c.id]+=1;
+        pts[a.id]+=4; pts[b.id]+=1; pts[c.id]+=1; litiges++;
       }
     }
     const rank=ps.map(p=>({name:dispName(p),pts:pts[p.id]})).sort((x,y)=>y.pts-x.pts);
-    return {pts,summary:rank.map(r=>`${r.name} ${r.pts}`).join(" · "),winner:rank[0]?.name};
+    const note=litiges?`  ⚖️ ${litiges} litige(s) — points partagés`:"";
+    return {pts,summary:rank.map(r=>`${r.name} ${r.pts}`).join(" · ")+note,
+      winner:rank[0]?.name,litiges};
   }
   if(f==="matchplay"||f==="matchplay2v2"){
     const a=f==="matchplay"?[ps[0]]:ps.slice(0,2);
