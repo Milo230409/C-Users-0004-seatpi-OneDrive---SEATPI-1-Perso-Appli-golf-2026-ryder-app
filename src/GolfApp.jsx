@@ -11,7 +11,13 @@ import { loadGroup, upsertEntity, deleteEntity, loadMyProfile, saveMyProfile, su
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v2.9 · match play"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.0 · admin"; // ← change à chaque mise en prod pour vérifier
+// Qui peut ouvrir le menu Réglages (clé API, lien WhatsApp…). Insensible à la casse.
+// Ajoute ici les prénoms/surnoms autorisés.
+const ADMIN_KEYS=["philippe","phil"];
+function isAdmin(u){ if(!u) return false;
+  const a=(u.name||"").trim().toLowerCase(), b=(u.nick||"").trim().toLowerCase();
+  return ADMIN_KEYS.includes(a)||ADMIN_KEYS.includes(b); }
 const T={
   bg:"#0a0f0c",        // fond quasi noir légèrement verdâtre
   panel:"#121a15",     // carte
@@ -259,6 +265,12 @@ export default function App(){
   // wrappers qui sauvegardent dans le cloud (clé publique, pas d'userId)
   const saveGames=async(next)=>{ setGames(next);
     if(cloud){ for(const g of next){ await upsertEntity("games",g,null); } } };
+  // suppression DÉFINITIVE d'une partie : il FAUT supprimer la ligne cloud,
+  // sinon la partie revient au resync (cause du bug "je n'arrive pas à supprimer").
+  const removeGame=async(game)=>{
+    setGames(games.filter(x=>x.id!==game.id));
+    if(cloud && game._row) await deleteEntity("games", game._row);
+  };
   const saveMembers=async(next)=>{ setMembers(next);
     if(cloud){ for(const m of next){ await upsertEntity("players",m,null); } } };
   const saveCourses=async(next)=>{ setCourses(next);
@@ -289,18 +301,20 @@ export default function App(){
     ["players","Joueurs","👤"],["champ","Classement","🏅"],["history","Historique","📜"]];
   return (
     <Ctx.Provider value={{user,setUser,members,setMembers:saveMembers,
-      games,setGames:saveGames,courses,setCourses:saveCourses,
-      cloud,syncing}}>
+      games,setGames:saveGames,removeGame,courses,setCourses:saveCourses,
+      cloud,syncing,admin:isAdmin(user)}}>
     <div style={shell}>
       <style>{GLOBAL_CSS}</style>
-      <Header user={user} onLogout={LOGIN_ENABLED?logout:null} setTab={setTab}/>
+      <Header user={user} onLogout={LOGIN_ENABLED?logout:null} setTab={setTab} admin={isAdmin(user)}/>
       <div style={{padding:"14px 14px 0"}}>
         {tab==="home"&&<Home setTab={setTab} staleCount={staleCount} refreshStale={refreshStale}/>}
         {tab==="new"&&<NewGame setTab={setTab}/>}
         {tab==="players"&&<PlayersTab/>}
         {tab==="champ"&&<Championship/>}
         {tab==="courses"&&<CoursesTab/>}
-        {tab==="settings"&&<SettingsTab/>}
+        {tab==="settings"&&(isAdmin(user)?<SettingsTab/>:
+          <Empty text="🔒 Réglages réservés à l'organisateur."/>)}
+        {tab==="account"&&<AccountTab/>}
         {tab==="history"&&<History/>}
       </div>
       <TabBar tabs={tabs} tab={tab} setTab={setTab}/>
@@ -518,7 +532,56 @@ function PrefRow({label,value,setValue,opts}){
   );
 }
 
-function Header({user,onLogout,setTab}){
+// "Mon compte" : chaque joueur met à jour SON profil (surnom, index, mobile, email, notif).
+function AccountTab(){
+  const {user,setUser,members,setMembers}=useContext(Ctx);
+  const me=members.find(m=>String(m.id)===String(user?.id))||user||{};
+  const [name,setName]=useState(me.name||"");
+  const [nick,setNick]=useState(me.nick||"");
+  const [mobile,setMobile]=useState(me.mobile||"");
+  const [email,setEmail]=useState(me.email||"");
+  const [index,setIndex]=useState(me.index!=null?String(me.index):"");
+  const [comm,setComm]=useState(me.comm||"whatsapp");
+  const [saved,setSaved]=useState(false);
+  const [err,setErr]=useState("");
+  const save=()=>{
+    if(!name.trim()) return setErr("Indique ton prénom.");
+    if(index==="") return setErr("Indique ton index de jeu.");
+    const updated={...me,id:user?.id??me.id,name:name.trim(),nick:nick.trim(),
+      mobile:mobile.trim(),email:email.trim(),index:parseFloat(index)||0,comm,profileDone:true};
+    const exists=members.some(m=>String(m.id)===String(updated.id));
+    setMembers(exists?members.map(m=>String(m.id)===String(updated.id)?updated:m):[...members,updated]);
+    setUser({...user,...updated});
+    setErr(""); setSaved(true); setTimeout(()=>setSaved(false),1800);
+  };
+  return (
+    <div>
+      <Section>Mon compte</Section>
+      <div style={{...card(T.gold),fontSize:12,color:T.dim,lineHeight:1.5}}>
+        Mets à jour tes infos quand tu veux. Ton <b style={{color:T.text}}>index</b> sert aussi
+        de « mot de passe » à ta prochaine connexion : si tu progresses, modifie-le ici.</div>
+      <Field label="Prénom"><input value={name} onChange={e=>setName(e.target.value)}
+        placeholder="Prénom" style={inp}/></Field>
+      <Field label="Surnom (affiché partout dans l'app)"><input value={nick}
+        onChange={e=>setNick(e.target.value)} placeholder="ex: passe-partout" style={inp}/></Field>
+      <Field label="Index de jeu *"><input type="number" step="0.1" value={index}
+        onChange={e=>setIndex(e.target.value)} placeholder="ex: 15.4" style={inp}/></Field>
+      <Field label="Mobile"><input type="tel" value={mobile}
+        onChange={e=>setMobile(e.target.value)} placeholder="06 12 34 56 78" style={inp}/></Field>
+      <Field label="Email"><input type="email" value={email}
+        onChange={e=>setEmail(e.target.value)} placeholder="email" style={inp}/></Field>
+      <div style={{marginTop:6}}>
+        <PrefRow label="Préférence de communication" value={comm} setValue={setComm}
+          opts={[["whatsapp","WhatsApp"],["email","Email"],["both","Les 2"],["none","Aucune"]]}/>
+      </div>
+      {err&&<div style={{color:T.gold,fontSize:12,marginTop:8}}>{err}</div>}
+      <button onClick={save} style={{...addBtn,background:saved?T.gold:T.accent,
+        color:saved?"#1a1200":"#04150b"}}>{saved?"✅ Enregistré":"Enregistrer mes infos"}</button>
+    </div>
+  );
+}
+
+function Header({user,onLogout,setTab,admin}){
   return (
     <div style={{padding:"22px 18px 14px",position:"relative",overflow:"hidden",
       borderBottom:`1px solid ${T.line}`,
@@ -533,8 +596,10 @@ function Header({user,onLogout,setTab}){
           <div style={{fontSize:11,color:T.dim,marginTop:3,fontWeight:600,letterSpacing:.3}}>
             {onLogout?`Salut ${user.nick?.trim()||user.name} 👋`:"Joue, partage, kiffe"}</div></div></div>
       <div style={{display:"flex",gap:8,alignItems:"center"}}>
-        {setTab&&<button onClick={()=>setTab("settings")} style={{...delBtn,fontSize:14,
-          padding:"7px 10px"}}>⚙️</button>}
+        {setTab&&onLogout&&<button onClick={()=>setTab("account")} title="Mon compte"
+          style={{...delBtn,fontSize:14,padding:"7px 10px"}}>👤</button>}
+        {setTab&&admin&&<button onClick={()=>setTab("settings")} title="Réglages"
+          style={{...delBtn,fontSize:14,padding:"7px 10px"}}>⚙️</button>}
         {onLogout && <button onClick={onLogout} style={{...delBtn,fontSize:11}}>Déconnexion</button>}
       </div>
     </div>
@@ -548,10 +613,13 @@ function TabBar({tabs,tab,setTab}){
 }
 
 function Home({setTab,staleCount,refreshStale}){
-  const {games,user}=useContext(Ctx);
+  const {games,user,admin}=useContext(Ctx);
+  // ouvrir WhatsApp si le lien existe ; sinon seul l'organisateur va aux Réglages
+  const goWa=()=>waLink?window.open(waLink,"_blank")
+    :(admin?setTab("settings"):alert("Le lien du groupe WhatsApp sera ajouté par l'organisateur."));
   const ongoing=games.filter(g=>!g.done);
   const done=games.filter(g=>g.done);
-  const prenom=(user?.nick?.trim()||user?.name||"").split(" ")[0]||"toi";
+  const prenom=dispName(user)||"toi"; // surnom complet (ex: "passe partout"), plus tronqué
   const waLink=DB.lget("waGroup","");
   return (
     <div>
@@ -581,7 +649,7 @@ function Home({setTab,staleCount,refreshStale}){
       </div>
 
       {/* Gros bouton WhatsApp visible */}
-      <button onClick={()=>waLink?window.open(waLink,"_blank"):setTab("settings")}
+      <button onClick={goWa}
         style={{width:"100%",marginTop:12,padding:"14px",borderRadius:16,border:"none",
           cursor:"pointer",background:"#25D366",color:"#06210f",fontWeight:800,fontSize:15,
           display:"flex",alignItems:"center",justifyContent:"center",gap:10,
@@ -607,7 +675,7 @@ function Home({setTab,staleCount,refreshStale}){
           sub="Championnat & confrontations" onClick={()=>setTab("champ")}/>
         <Tile color="#25D366" icon="💬" title="Chat du groupe"
           sub={waLink?"Ouvrir WhatsApp":"À configurer (Réglages)"}
-          onClick={()=>waLink?window.open(waLink,"_blank"):setTab("settings")}/>
+          onClick={goWa}/>
         <Tile color={T.eu} icon="⛳" title="Parcours"
           sub="Gérer / importer" onClick={()=>setTab("courses")}/>
       </div>
@@ -1432,11 +1500,12 @@ function HoleEditor({c,upd}){
 }
 
 function History(){
-  const {games,setGames,members,courses}=useContext(Ctx);
+  const {games,setGames,members,courses,removeGame}=useContext(Ctx);
   const [open,setOpen]=useState(null);
   const delGame=(id,e)=>{e.stopPropagation();
-    if(confirm("Supprimer définitivement cette partie de l'historique ?"))
-      setGames(games.filter(x=>x.id!==id));};
+    const g=games.find(x=>x.id===id);
+    if(g&&confirm("Supprimer définitivement cette partie de l'historique ?"))
+      removeGame(g);};
   if(!games.length) return <Empty text="Aucune partie. Crée-en une depuis l'accueil."/>;
   if(open){const g=games.find(x=>x.id===open);
     if(g) return <GameDetail g={g} members={members} courses={courses} games={games}
