@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, loadMyProfile, saveMyProfile, su
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v2.7 · profils"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v2.8 · parcours réels"; // ← change à chaque mise en prod pour vérifier
 const T={
   bg:"#0a0f0c",        // fond quasi noir légèrement verdâtre
   panel:"#121a15",     // carte
