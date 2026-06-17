@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, loadMyProfile, saveMyProfile, su
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.6 · progression"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.7 · rejoindre"; // ← change à chaque mise en prod pour vérifier
 // Qui peut ouvrir le menu Réglages (clé API, lien WhatsApp…). Insensible à la casse.
 // Ajoute ici les prénoms/surnoms autorisés.
 const ADMIN_KEYS=["philippe","phil"];
@@ -223,6 +223,8 @@ export default function App(){
   const [games,setGames]=useState(()=>DB.lget("games",[]));
   const [courses,setCourses]=useState(()=>DB.lget("courses",SEED_COURSES));
   const [tab,setTab]=useState("home");
+  const [openGameId,setOpenGameId]=useState(null); // partie à ouvrir (ex: rejoindre)
+  const openGame=(id)=>{ setOpenGameId(id); setTab("history"); };
   const [staleCount,setStaleCount]=useState(0);
   const [syncing,setSyncing]=useState(false);
   const [loaded,setLoaded]=useState(false);
@@ -307,7 +309,7 @@ export default function App(){
       <style>{GLOBAL_CSS}</style>
       <Header user={user} onLogout={LOGIN_ENABLED?logout:null} setTab={setTab} admin={isAdmin(user)}/>
       <div style={{padding:"14px 14px 0"}}>
-        {tab==="home"&&<Home setTab={setTab} staleCount={staleCount} refreshStale={refreshStale}/>}
+        {tab==="home"&&<Home setTab={setTab} staleCount={staleCount} refreshStale={refreshStale} openGame={openGame}/>}
         {tab==="new"&&<NewGame setTab={setTab}/>}
         {tab==="players"&&<PlayersTab/>}
         {tab==="champ"&&<Championship/>}
@@ -316,7 +318,7 @@ export default function App(){
           <Empty text="🔒 Réglages réservés à l'organisateur."/>)}
         {tab==="account"&&<AccountTab/>}
         {tab==="faq"&&<FaqTab/>}
-        {tab==="history"&&<History/>}
+        {tab==="history"&&<History openId={openGameId} onConsumeOpen={()=>setOpenGameId(null)}/>}
       </div>
       <TabBar tabs={tabs} tab={tab} setTab={setTab}/>
     </div>
@@ -647,7 +649,7 @@ function TabBar({tabs,tab,setTab}){
     </button>))}</div>);
 }
 
-function Home({setTab,staleCount,refreshStale}){
+function Home({setTab,staleCount,refreshStale,openGame}){
   const {games,user,admin}=useContext(Ctx);
   // ouvrir WhatsApp si le lien existe ; sinon seul l'organisateur va aux Réglages
   const goWa=()=>waLink?window.open(waLink,"_blank")
@@ -656,8 +658,25 @@ function Home({setTab,staleCount,refreshStale}){
   const done=games.filter(g=>g.done);
   const prenom=dispName(user)||"toi"; // surnom complet (ex: "passe partout"), plus tronqué
   const waLink=DB.lget("waGroup","");
+  // partie EN COURS où je suis inscrit → on propose de la rejoindre
+  const [hideJoin,setHideJoin]=useState(false);
+  const myLive=ongoing.find(g=>(g.roster||[]).some(p=>String(p.id)===String(user?.id)));
   return (
     <div>
+      {myLive && !hideJoin && (
+        <div style={{...card(T.accent),marginBottom:14,
+          background:`linear-gradient(160deg, ${T.accent}22 0%, ${T.panel} 60%)`}}>
+          <div style={{fontWeight:800,marginBottom:2}}>🔔 Une partie est en cours</div>
+          <div style={{fontSize:12,color:T.dim,marginBottom:10}}>
+            Tu es inscrit à <b style={{color:T.text}}>{myLive.name}</b>. Tu veux la rejoindre ?</div>
+          <div style={{display:"flex",gap:8}}>
+            <button onClick={()=>openGame&&openGame(myLive.id)}
+              style={{...addBtn,margin:0,flex:1}}>✅ Rejoindre</button>
+            <button onClick={()=>setHideJoin(true)}
+              style={{...delBtn,padding:"11px 14px"}}>Plus tard</button>
+          </div>
+        </div>
+      )}
       <div style={{margin:"6px 0 18px"}}>
         <div style={{fontFamily:"'Archivo',sans-serif",fontWeight:900,fontSize:25,
           lineHeight:1.05,letterSpacing:-.5}}>
@@ -1585,9 +1604,10 @@ function HoleEditor({c,upd}){
   );
 }
 
-function History(){
+function History({openId,onConsumeOpen}){
   const {games,setGames,members,courses,removeGame}=useContext(Ctx);
-  const [open,setOpen]=useState(null);
+  const [open,setOpen]=useState(openId||null);
+  useEffect(()=>{ if(openId){ setOpen(openId); onConsumeOpen&&onConsumeOpen(); } },[openId]);
   const delGame=(id,e)=>{e.stopPropagation();
     const g=games.find(x=>x.id===id);
     if(g&&confirm("Supprimer définitivement cette partie de l'historique ?"))
