@@ -3,11 +3,11 @@
 --  Slope + SSS + HCP de chaque trou relevés sur les cartes de score.
 --  À coller dans Supabase → SQL Editor → Run (après schema.sql + open_access.sql).
 --  Idempotent : on efface les parcours seed puis on réinsère.
+--  → Uniquement les 15 parcours de la liste (les autres sont retirés).
 -- ============================================================
 
 delete from public.courses where (data->>'source') is null;
 
--- ✅ 15 PARCOURS VÉRIFIÉS (cartes de score officielles, départ jaune)
 insert into public.courses (data) values
   ('{"id": 1, "name": "Golf Platja de Pals", "country": "Espagne", "par": 73, "si": [16, 8, 14, 4, 6, 18, 2, 10, 12, 5, 17, 1, 13, 7, 15, 9, 3, 11], "tees": [{"name": "Jaune", "cr": 72.0, "slope": 133, "par": 73}]}'::jsonb),
   ('{"id": 2, "name": "Empordà — Forest", "country": "Espagne", "par": 72, "si": [7, 15, 5, 9, 17, 11, 1, 13, 3, 8, 14, 18, 4, 16, 12, 6, 10, 2], "tees": [{"name": "Jaune", "cr": 72.1, "slope": 126, "par": 72}]}'::jsonb),
@@ -24,19 +24,6 @@ insert into public.courses (data) values
   ('{"id": 21, "name": "Golf de la Cabre d''Or", "country": "France", "par": 70, "si": [13, 5, 9, 1, 15, 11, 7, 17, 3, 16, 10, 18, 4, 14, 2, 12, 8, 6], "tees": [{"name": "Jaune", "cr": 70.4, "slope": 137, "par": 70}]}'::jsonb),
   ('{"id": 23, "name": "Golf Dolce Frégate Provence", "country": "France", "par": 72, "si": [7, 17, 11, 5, 3, 15, 9, 13, 1, 6, 12, 2, 8, 10, 18, 16, 4, 14], "tees": [{"name": "Jaune", "cr": 70.4, "slope": 126, "par": 72}]}'::jsonb),
   ('{"id": 24, "name": "Golf d''Aix-en-Provence (Rouge)", "country": "France", "par": 70, "si": [9, 16, 8, 7, 17, 1, 18, 6, 15, 2, 3, 14, 5, 10, 4, 12, 11, 13], "tees": [{"name": "Jaune", "cr": 67.2, "slope": 129, "par": 70}]}'::jsonb);
-
--- ⚠️ PARCOURS NON FOURNIS (Catalogne) : valeurs encore à vérifier (HCP générique).
---    Remplace-les quand tu auras leurs cartes (même format ci-dessus).
-insert into public.courses (data) values
-  ('{"id": 4, "name": "PGA Catalunya — Stadium", "country": "Espagne", "par": 72, "si": [7, 13, 1, 11, 5, 17, 3, 15, 9, 8, 14, 2, 12, 6, 18, 4, 16, 10], "tees": [{"name": "Jaune", "cr": 73.5, "slope": 145, "par": 72}]}'::jsonb),
-  ('{"id": 5, "name": "PGA Catalunya — Tour", "country": "Espagne", "par": 72, "si": [7, 13, 1, 11, 5, 17, 3, 15, 9, 8, 14, 2, 12, 6, 18, 4, 16, 10], "tees": [{"name": "Jaune", "cr": 71.6, "slope": 133, "par": 72}]}'::jsonb),
-  ('{"id": 6, "name": "Club de Golf Costa Brava — Verde", "country": "Espagne", "par": 70, "si": [7, 13, 1, 11, 5, 17, 3, 15, 9, 8, 14, 2, 12, 6, 18, 4, 16, 10], "tees": [{"name": "Jaune", "cr": 69.4, "slope": 130, "par": 70}]}'::jsonb),
-  ('{"id": 7, "name": "Club de Golf Costa Brava — Rojo", "country": "Espagne", "par": 73, "si": [7, 13, 1, 11, 5, 17, 3, 15, 9, 8, 14, 2, 12, 6, 18, 4, 16, 10], "tees": [{"name": "Jaune", "cr": 71.5, "slope": 132, "par": 73}]}'::jsonb),
-  ('{"id": 8, "name": "Golf d''Aro — Mas Nou", "country": "Espagne", "par": 72, "si": [7, 13, 1, 11, 5, 17, 3, 15, 9, 8, 14, 2, 12, 6, 18, 4, 16, 10], "tees": [{"name": "Jaune", "cr": 72.0, "slope": 136, "par": 72}]}'::jsonb),
-  ('{"id": 10, "name": "Club de Golf Peralada", "country": "Espagne", "par": 71, "si": [7, 13, 1, 11, 5, 17, 3, 15, 9, 8, 14, 2, 12, 6, 18, 4, 16, 10], "tees": [{"name": "Jaune", "cr": 70.8, "slope": 131, "par": 71}]}'::jsonb),
-  ('{"id": 11, "name": "Golf Girona", "country": "Espagne", "par": 72, "si": [7, 13, 1, 11, 5, 17, 3, 15, 9, 8, 14, 2, 12, 6, 18, 4, 16, 10], "tees": [{"name": "Jaune", "cr": 71.2, "slope": 133, "par": 72}]}'::jsonb),
-  ('{"id": 12, "name": "Camiral (PGA Catalunya Resort)", "country": "Espagne", "par": 72, "si": [7, 13, 1, 11, 5, 17, 3, 15, 9, 8, 14, 2, 12, 6, 18, 4, 16, 10], "tees": [{"name": "Jaune", "cr": 73.0, "slope": 142, "par": 72}]}'::jsonb),
-  ('{"id": 22, "name": "Golf de Saumane (Provence)", "country": "France", "par": 72, "si": [7, 13, 1, 11, 5, 17, 3, 15, 9, 8, 14, 2, 12, 6, 18, 4, 16, 10], "tees": [{"name": "Jaune", "cr": 71.2, "slope": 133, "par": 72}]}'::jsonb);
 
 -- Vérif : la liste des parcours
 select data->>'name' as parcours, data->>'par' as par,
