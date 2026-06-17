@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, createContext, useContext } from "react";
+import React, { useState, useEffect, useMemo, useRef, createContext, useContext } from "react";
 import { supabase, supabaseEnabled } from "./supabaseClient";
 import { loadGroup, upsertEntity, deleteEntity, loadMyProfile, saveMyProfile, subscribeGroup } from "./supabaseSync";
 
@@ -11,11 +11,13 @@ import { loadGroup, upsertEntity, deleteEntity, loadMyProfile, saveMyProfile, su
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.11 · membres"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.12 · session"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
 const DEFAULT_WA="https://chat.whatsapp.com/JRErxQfHbNkJ4xFutnjklk";
+// Déconnexion auto après cette durée d'INACTIVITÉ (sauf si en partie en cours).
+const SESSION_TIMEOUT=2*60*60*1000; // 2 heures
 // Qui peut ouvrir le menu Réglages (clé API, lien WhatsApp…). Insensible à la casse.
 // Ajoute ici les prénoms/surnoms autorisés.
 const ADMIN_KEYS=["philippe","phil"];
@@ -272,6 +274,21 @@ export default function App(){
       if(cloud) stale.forEach(g=>{ if(g._row) deleteEntity("games",g._row); });
     }
   },[games,cloud]);
+
+  // ---- Déconnexion auto après inactivité — SAUF si le joueur est dans une partie en cours ----
+  const lastActivity=useRef(Date.now());
+  useEffect(()=>{ const bump=()=>{lastActivity.current=Date.now();};
+    const evs=["click","keydown","touchstart","pointerdown"];
+    evs.forEach(e=>window.addEventListener(e,bump));
+    return ()=>evs.forEach(e=>window.removeEventListener(e,bump)); },[]);
+  useEffect(()=>{
+    if(!user) return;
+    const iv=setInterval(()=>{
+      const inGame=games.some(g=>!g.done && (g.roster||[]).some(p=>String(p.id)===String(user?.id)));
+      if(!inGame && Date.now()-lastActivity.current>SESSION_TIMEOUT) setUser(null); // retour à "Qui es-tu ?"
+    },60*1000);
+    return ()=>clearInterval(iv);
+  },[user,games]);
 
   // ---- Persistance locale (toujours, pour le mode hors-ligne / invité) ----
   useEffect(()=>{ DB.lset("user",user); },[user]);
