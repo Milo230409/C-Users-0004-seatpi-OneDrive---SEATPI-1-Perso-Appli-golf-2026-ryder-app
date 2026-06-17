@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, loadMyProfile, saveMyProfile, su
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.5 · FAQ"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.6 · progression"; // ← change à chaque mise en prod pour vérifier
 // Qui peut ouvrir le menu Réglages (clé API, lien WhatsApp…). Insensible à la casse.
 // Ajoute ici les prénoms/surnoms autorisés.
 const ADMIN_KEYS=["philippe","phil"];
@@ -1190,14 +1190,18 @@ function computeStandings(done, courses){
 // Impact d'une partie sur le classement de saison : points gagnés + nouveau total/rang.
 function seasonImpact(g, games, courses){
   const done=games.filter(x=>x.done);
-  const after=computeStandings(done,courses).S;
-  const before=computeStandings(done.filter(x=>String(x.id)!==String(g.id)),courses).S;
-  const ranking=Object.entries(after).map(([id,s])=>({id,pts:s.pts})).sort((x,y)=>y.pts-x.pts);
-  const rankOf=id=>{const i=ranking.findIndex(r=>String(r.id)===String(id));return i<0?null:i+1;};
+  const afterS=computeStandings(done,courses).S;
+  const beforeS=computeStandings(done.filter(x=>String(x.id)!==String(g.id)),courses).S;
+  // rang au classement CUMULÉ (par points), avant et après la partie
+  const rankMap=S=>{const m={};Object.entries(S).map(([id,s])=>({id,pts:s.pts}))
+    .sort((x,y)=>y.pts-x.pts).forEach((e,i)=>m[e.id]=i+1);return m;};
+  const aR=rankMap(afterS), bR=rankMap(beforeS);
   const ids=[...new Set((g.roster||[]).map(p=>p.id))];
-  const lines=ids.map(id=>{const a=after[id]||{pts:0}, b=before[id]||{pts:0};
-    return {id, gained:Math.round(((a.pts||0)-(b.pts||0))*10)/10, total:a.pts||0, rank:rankOf(id)};
-  }).sort((x,y)=>y.gained-x.gained);
+  const lines=ids.map(id=>{const a=afterS[id]||{pts:0}, b=beforeS[id]||{pts:0};
+    const ar=aR[id]||null, br=bR[id]||null;
+    return {id, gained:Math.round(((a.pts||0)-(b.pts||0))*10)/10, total:a.pts||0,
+      rank:ar, delta:(ar&&br)?(br-ar):null, isNew:!!(ar&&!br)}; // delta>0 = a gagné des places
+  }).sort((x,y)=>(x.rank||99)-(y.rank||99)); // ordre du classement général
   return {lines};
 }
 
@@ -1806,7 +1810,8 @@ function ShareResults({g,courses,playerById}){
     if(impact.lines.length){
       t+=`${D}\n🏅 Classement de saison\n`;
       impact.lines.forEach(l=>{const p=playerById(l.id);
-        t+=`   ${dispName(p)}  +${l.gained} → ${l.total} pts${l.rank?`  #${l.rank}`:""}\n`;});
+        const prog=l.isNew?" (NEW)":l.delta>0?` ▲${l.delta}`:l.delta<0?` ▼${-l.delta}`:" =";
+        t+=`   ${dispName(p)}  +${l.gained} → ${l.total} pts${l.rank?`  #${l.rank}`:""}${prog}\n`;});
     }
     t+=`${D}\n⛳ Du Golf & des Amis`;
     return t.trim();
@@ -1829,17 +1834,20 @@ function ShareResults({g,courses,playerById}){
         <div style={{...card(T.gold),marginBottom:12}}>
           <div style={{fontWeight:800,marginBottom:8}}>🏅 Évolution au classement de saison</div>
           {impact.lines.map((l,i)=>{const p=playerById(l.id);
+            const medal=l.rank===1?"🥇":l.rank===2?"🥈":l.rank===3?"🥉":`#${l.rank||"-"}`;
             return (<div key={l.id} style={{display:"flex",alignItems:"center",gap:8,
-              padding:"6px 0",borderTop:i?`1px solid ${T.line}`:"none"}}>
-              <span style={{width:22,textAlign:"center",fontWeight:800,
-                color:i===0?T.gold:T.dim}}>{i===0?"🥇":`#${l.rank||"-"}`}</span>
+              padding:"7px 0",borderTop:i?`1px solid ${T.line}`:"none"}}>
+              <span style={{width:26,textAlign:"center",fontWeight:800,fontSize:15,
+                color:l.rank<=3?T.gold:T.dim}}>{medal}</span>
               <span style={{flex:1,fontWeight:700}}>{dispName(p)}</span>
-              <span style={{color:T.accent,fontWeight:800,fontSize:13}}>+{l.gained}</span>
-              <span style={{color:T.dim,fontSize:12}}>→ {l.total} pts</span>
-              <span style={{color:T.gold,fontSize:11,width:34,textAlign:"right"}}>#{l.rank||"-"}</span>
+              <span style={{fontSize:11,fontWeight:800,width:36,textAlign:"center",
+                color:l.isNew?T.gold:l.delta>0?T.accent:l.delta<0?T.us:T.dim}}>
+                {l.isNew?"NEW":l.delta>0?`▲${l.delta}`:l.delta<0?`▼${-l.delta}`:"="}</span>
+              <span style={{color:T.accent,fontWeight:800,fontSize:13,width:34,textAlign:"right"}}>+{l.gained}</span>
+              <span style={{color:T.dim,fontSize:12,width:54,textAlign:"right"}}>{l.total} pts</span>
             </div>);})}
           <div style={{fontSize:10,color:T.dim,marginTop:6}}>
-            Points gagnés cette partie · total et rang au classement général.</div>
+            Rang général · ▲/▼ places gagnées cette partie · points gagnés · total.</div>
         </div>
       )}
       <button onClick={share} style={{...addBtn,background:"#25D366",color:"#062b14"}}>
