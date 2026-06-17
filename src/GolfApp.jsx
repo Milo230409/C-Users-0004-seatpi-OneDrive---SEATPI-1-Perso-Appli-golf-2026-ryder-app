@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, loadMyProfile, saveMyProfile, su
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.3 · lisible"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.4 · classement"; // ← change à chaque mise en prod pour vérifier
 // Qui peut ouvrir le menu Réglages (clé API, lien WhatsApp…). Insensible à la casse.
 // Ajoute ici les prénoms/surnoms autorisés.
 const ADMIN_KEYS=["philippe","phil"];
@@ -1107,12 +1107,14 @@ function Championship(){
       const subs=g.rounds
         ? g.rounds.flatMap(r=>r.subgames.map(sg=>({sg,course:courses.find(c=>c.id===r.courseId)})))
         : (g.subgames||[]).map(sg=>({sg,course:courses.find(c=>c.id===g.courseId)}));
+      const gamePts={}; // points accumulés DANS cette partie (pour le bonus tournoi)
       subs.forEach(({sg,course})=>{
         const ps=sg.players.map(id=>g.roster.find(p=>p.id===id)).filter(Boolean);
-        const {pts,h2h}=playerScores(sg,ps,course,net);
+        const {pts,h2h,res}=playerScores(sg,ps,course,net);
         Object.entries(pts).forEach(([id,pt])=>{
-          const s=ensure(id);s.pts+=pt;s.played++;
-          if(pt===2)s.win++;else if(pt===1)s.draw++;else s.loss++;});
+          const s=ensure(id);s.pts+=pt;s.played++;gamePts[id]=(gamePts[id]||0)+pt;
+          const r=res?.[id];
+          if(r==='W')s.win++;else if(r==='D')s.draw++;else s.loss++;});
         h2h.forEach(({a,b,res})=>{
           const key=a<b?`${a}|${b}`:`${b}|${a}`;
           if(!H[key])H[key]={a:0,b:0,nul:0};
@@ -1121,6 +1123,20 @@ function Championship(){
           else if((res==="a")!==flip)H[key].a++;else H[key].b++;
         });
       });
+      // 🏆 BONUS TROPHÉE : +5 au(x) vainqueur(s) d'un TOURNOI (event multi-manches)
+      if(g.rounds){
+        const teamPlay=g.teamNames && g.roster?.some(p=>p.team===0||p.team===1);
+        if(teamPlay){ // Ryder : l'équipe qui marque le plus de points
+          const tt=[0,0];
+          g.roster.forEach(p=>{ if(p.team===0||p.team===1) tt[p.team]+=(gamePts[p.id]||0); });
+          const win=tt[0]>tt[1]?0:tt[1]>tt[0]?1:null;
+          if(win!=null) g.roster.forEach(p=>{ if(p.team===win&&S[p.id]) S[p.id].pts+=5; });
+        } else { // tournoi individuel : meilleur total de la partie
+          const ids=Object.keys(gamePts);
+          if(ids.length){ const mx=Math.max(...ids.map(id=>gamePts[id]));
+            ids.filter(id=>gamePts[id]===mx).forEach(id=>{ if(S[id]) S[id].pts+=5; }); }
+        }
+      }
     });
     return {S,H};
   },[done,courses]);
@@ -1135,13 +1151,14 @@ function Championship(){
   return (
     <div>
       <Section>Championnat</Section>
-      <div style={{...card(T.gold),fontSize:12,color:T.dim}}>
-        🏅 Points <b style={{color:T.text}}>2 victoire · 1 nul · 0 défaite</b> par joueur, sur
-        chaque match. Un tournoi compte une partie <b style={{color:T.text}}>par manche</b> :
-        une Ryder à 4 parcours pèse donc ×4 une partie amicale. Deux classements :
-        {" "}<b style={{color:T.text}}>cumulé</b> (qui joue plus marque plus) et
-        {" "}<b style={{color:T.text}}>moyenne par partie</b> (pour ne pas pénaliser ceux qui
-        jouent moins).</div>
+      <div style={{...card(T.gold),fontSize:12,color:T.dim,lineHeight:1.5}}>
+        🏅 <b style={{color:T.text}}>Points par DUEL</b> (qui bat qui) :
+        {" "}<b style={{color:T.text}}>1v1</b> → V 3 · N 1 · D 0.
+        {" "}<b style={{color:T.text}}>À 3</b> → 2 duels (V 2 · N 1 · D 0) : battre les 2 = 4.
+        {" "}<b style={{color:T.text}}>Double 2v2</b> → V 3 · N 1 · D 0 par équipier.
+        {" "}<b style={{color:T.text}}>Tournoi</b> : chaque manche compte +
+        {" "}<b style={{color:T.gold}}>🏆 +5 au vainqueur</b>. Deux classements :
+        {" "}<b style={{color:T.text}}>cumulé</b> et <b style={{color:T.text}}>moyenne/partie</b>.</div>
 
       <div style={{display:"flex",gap:10,marginTop:4}}>
         <RankCol title="🔢 CUMULÉ" rows={byTotal} metric={r=>r.pts} unit="pts"/>
@@ -2514,20 +2531,22 @@ function playerScores(sg,ps,course,net){
     const a=ps.slice(0,2),b=ps.slice(2,4);
     const r=computeSub(sg,ps,course,net)||{};
     const cumA=r.mexA||0,cumB=r.mexB||0;
-    const av=cumA>cumB?2:cumA<cumB?0:1, bv=cumB>cumA?2:cumB<cumA?0:1;
-    a.forEach(p=>pts[p.id]=av); b.forEach(p=>pts[p.id]=bv);
-    return {pts,h2h};
+    const av=cumA>cumB?3:cumA<cumB?0:1, bv=cumB>cumA?3:cumB<cumA?0:1;
+    const ra=cumA>cumB?'W':cumA<cumB?'L':'D', rb=cumB>cumA?'W':cumB<cumA?'L':'D';
+    const res={};a.forEach(p=>{pts[p.id]=av;res[p.id]=ra;}); b.forEach(p=>{pts[p.id]=bv;res[p.id]=rb;});
+    return {pts,h2h,res};
   }
-  // Formats équipe : 2 vs 2 → victoire collective, points partagés par membre
+  // Formats équipe : 2 vs 2 → victoire collective (3/1/0) par membre
   if(f==="fourball"||f==="foursome"||f==="scramble"||f==="matchplay2v2"){
     const a=ps.slice(0,2),b=ps.slice(2,4);
     const th=(team,h)=>{const v=team.map(p=>nets[p.id][h]).filter(x=>x!=null);
       return v.length?Math.min(...v):null;};
     let w=0;for(let h=0;h<18;h++){const e=th(a,h),u=th(b,h);
       if(e==null||u==null)continue;if(e<u)w++;else if(u<e)w--;}
-    const av=w>0?2:w<0?0:1, bv=w<0?2:w>0?0:1;
-    a.forEach(p=>pts[p.id]=av); b.forEach(p=>pts[p.id]=bv);
-    return {pts,h2h};
+    const av=w>0?3:w<0?0:1, bv=w<0?3:w>0?0:1;
+    const ra=w>0?'W':w<0?'L':'D', rb=w<0?'W':w>0?'L':'D';
+    const res={};a.forEach(p=>{pts[p.id]=av;res[p.id]=ra;}); b.forEach(p=>{pts[p.id]=bv;res[p.id]=rb;});
+    return {pts,h2h,res};
   }
   // Tous les autres (1v1, chouette, 1v1v1, stableford, skins, stroke) :
   // classement par total net croissant ; départage à égalité = birdies nets (plus = mieux).
@@ -2538,18 +2557,25 @@ function playerScores(sg,ps,course,net){
   // gagnant(s) : total ET birdies identiques au meilleur = égalité parfaite
   const top=ranked[0];
   const winners=ranked.filter(p=>total(p)===total(top)&&bd(p)===bd(top));
-  ps.forEach(p=>pts[p.id]=0);
-  if(winners.length===1) pts[winners[0].id]=2;
-  else winners.forEach(p=>pts[p.id]=1); // égalité parfaite (total + birdies) = nul
   // confrontations individuelles (chaque paire), départage birdies nets
   for(let i=0;i<ranked.length;i++)for(let j=i+1;j<ranked.length;j++){
     const A=ranked[i],B=ranked[j],ta=total(A),tb=total(B),ba=bd(A),bb=bd(B);
-    let res;
-    if(ta<tb) res="a"; else if(tb<ta) res="b";
-    else if(ba>bb) res="a"; else if(bb>ba) res="b"; else res="nul";
-    h2h.push({a:A.id,b:B.id,res});
+    let dr;
+    if(ta<tb) dr="a"; else if(tb<ta) dr="b";
+    else if(ba>bb) dr="a"; else if(bb>ba) dr="b"; else dr="nul";
+    h2h.push({a:A.id,b:B.id,res:dr});
   }
-  return {pts,h2h};
+  // POINTS DE MATCH = somme des DUELS. Victoire = 3 en 1v1, 2 à 3 joueurs
+  // (pour que battre 2 rapporte +1, pas le double). Nul 1, défaite 0.
+  const Wv = ps.length<=2 ? 3 : ps.length===3 ? 2 : 1;
+  ps.forEach(p=>pts[p.id]=0);
+  h2h.forEach(d=>{ if(d.res==="nul"){pts[d.a]+=1;pts[d.b]+=1;}
+    else if(d.res==="a")pts[d.a]+=Wv; else pts[d.b]+=Wv; });
+  // bilan victoire/nul/défaite DU MATCH (pour la colonne V-N-D)
+  const res={}; ps.forEach(p=>res[p.id]='L');
+  if(winners.length===1) res[winners[0].id]='W';
+  else winners.forEach(p=>res[p.id]='D');
+  return {pts,h2h,res};
 }
 
 const SEED_MEMBERS=[
