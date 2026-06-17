@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, loadMyProfile, saveMyProfile, su
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v2.8 · parcours réels"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v2.9 · match play"; // ← change à chaque mise en prod pour vérifier
 const T={
   bg:"#0a0f0c",        // fond quasi noir légèrement verdâtre
   panel:"#121a15",     // carte
@@ -51,6 +51,18 @@ const dispName=p=>p?.nick?.trim()||p?.name||"?";
 function courseHandicap(index,slope,cr,par){
   if(index==null) return 0;
   return Math.round(index*((slope||113)/113)+((cr??par??72)-(par??72)));
+}
+// CHP effectif pour l'attribution des coups rendus :
+//  - intégral (relative=false)  : chaque joueur reçoit son CHP complet (stroke play).
+//  - différentiel (relative=true, match play) : on retranche le plus bas CHP du groupe,
+//    donc le plus bas joue à 0 et les autres reçoivent l'ÉCART, sur les trous les plus durs.
+function effChp(p,ps,course,relative){
+  const t=teeData(course,p.tee);
+  const raw=courseHandicap(p.index,t.slope,t.cr,t.par);
+  if(!relative||!ps||ps.length<2) return raw;
+  const min=Math.min(...ps.map(q=>{const tq=teeData(course,q.tee);
+    return courseHandicap(q.index,tq.slope,tq.cr,tq.par);}));
+  return raw-min;
 }
 function strokesPerHole(chp,si){
   const holes=(si&&si.length===18)?si:Array.from({length:18},(_,i)=>i+1);
@@ -681,6 +693,7 @@ function NewGame({setTab}){
   const [name,setName]=useState("");
   const [courseId,setCourseId]=useState(courses[0]?.id);
   const [mode,setMode]=useState("net");
+  const [hcpRelative,setHcpRelative]=useState(false); // coups rendus différentiel (match play)
   const [selected,setSelected]=useState([]);
   const [guests,setGuests]=useState([]);
   const [tees,setTees]=useState({});
@@ -742,9 +755,9 @@ function NewGame({setTab}){
       team:type==="event"?null:undefined}));
     if(type==="simple"){
       const ids=roster.map(p=>p.id);
-      const subgames=[{id:1,formula,players:ids,scores:{},validated:[],done:false}];
+      const subgames=[{id:1,formula,players:ids,scores:{},validated:[],done:false,hcpRelative}];
       const game={id:Date.now(),name:finalName(),type,courseId,mode,roster,subgames,
-        teamNames:null,done:false,created:Date.now()};
+        hcpRelative,teamNames:null,done:false,created:Date.now()};
       setGames([game,...games]);setTab("history");return;
     }
     // TOURNOI : chaque manche a SON parcours + SA répartition (formules choisies à la main)
@@ -754,12 +767,12 @@ function NewGame({setTab}){
       (r.split||autoSplit(n)).forEach(grp=>{const gp=pool.splice(0,grp.size);
         const ids=gp.map(p=>p.id);
         subgames.push({id:i++,formula:grp.formula,players:ids,
-          scores:{},validated:[],done:false});});
+          scores:{},validated:[],done:false,hcpRelative});});
       return {id:ri+1,courseId:r.courseId,courseName:c?.name||"Parcours",
         subgames,done:false};
     });
     const game={id:Date.now(),name:finalName(),type,subtype,mode,roster,rounds:tRounds,
-      teamNames:["Équipe 1","Équipe 2"],done:false,created:Date.now()};
+      hcpRelative,teamNames:["Équipe 1","Équipe 2"],done:false,created:Date.now()};
     setGames([game,...games]);setTab("history");
   };
 
@@ -810,6 +823,23 @@ function NewGame({setTab}){
       <Field label="Décompte"><select value={mode} onChange={e=>setMode(e.target.value)}
         style={inp}><option value="net">Net (coups rendus)</option>
         <option value="gross">Brut</option></select></Field>
+
+      {mode==="net" && (
+        <div onClick={()=>setHcpRelative(v=>!v)} style={{...card(hcpRelative?T.accent:T.line),
+          cursor:"pointer",display:"flex",gap:10,alignItems:"flex-start",marginTop:2}}>
+          <div style={{width:22,height:22,borderRadius:6,flexShrink:0,marginTop:1,
+            border:`2px solid ${hcpRelative?T.accent:T.line}`,
+            background:hcpRelative?T.accent:"transparent",color:T.ink,
+            display:"flex",alignItems:"center",justifyContent:"center",
+            fontWeight:900,fontSize:14}}>{hcpRelative?"✓":""}</div>
+          <div>
+            <div style={{fontWeight:800,fontSize:13}}>Coups rendus en différentiel (match play)</div>
+            <div style={{fontSize:11,color:T.dim,marginTop:2,lineHeight:1.4}}>
+              Coché : on rend l'<b>écart</b> entre joueurs sur les trous les plus durs
+              (le plus bas joue à 0). Décoché : chacun reçoit son total complet (stroke play).</div>
+          </div>
+        </div>
+      )}
 
       <Section>Membres</Section>
       <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
@@ -1602,8 +1632,8 @@ function ShareResults({g,courses,playerById}){
       if(r)t+=`   ${FORMULA_LABELS[sg.formula]}\n   → ${r.summary}\n`;
       // coups rendus par joueur (si partie en net)
       if(net && c){
-        const cr=ps.map(p=>{const td=teeData(c,p.tee);
-          const chp=courseHandicap(p.index,td.slope,td.cr,td.par);
+        const cr=ps.map(p=>{
+          const chp=effChp(p,ps,c,sg.hcpRelative);
           return `${dispName(p)} ${chp}`;}).join(" · ");
         t+=`   🎯 Coups rendus : ${cr}\n`;
       }
@@ -1692,19 +1722,22 @@ function HolesBriefing({course}){
 
 function Briefing({g,course,playerById,onStart}){
   const net=g.mode==="net";
-  const rows=g.roster.map(p=>{
-    const t=teeData(course,p.tee);
-    const chp=courseHandicap(p.index,t.slope,t.cr,t.par);
+  const rel=!!g.hcpRelative; // coups rendus en différentiel (match play)
+  const base=g.roster.map(p=>{const t=teeData(course,p.tee);
+    return {p,t,raw:courseHandicap(p.index,t.slope,t.cr,t.par)};});
+  const minChp=base.length?Math.min(...base.map(r=>r.raw)):0;
+  const rows=base.map(({p,t,raw})=>{
+    const chp=rel?raw-minChp:raw;               // coups réellement rendus
     const holes=net?strokeHoles(chp,course?.si):[];
     return {p,t,chp,holes};
   });
-  const minChp=Math.min(...rows.map(r=>r.chp));
   return (
     <div>
       <div style={{...card(T.accent)}}>
         <div style={{fontWeight:800,marginBottom:4}}>⛳ {course?.name}</div>
         <div style={{fontSize:12,color:T.dim}}>
-          Par {course?.par} · {g.mode==="net"?"Jeu en NET (coups rendus)":"Jeu en BRUT"}</div>
+          Par {course?.par} · {g.mode==="net"?"Jeu en NET (coups rendus)":"Jeu en BRUT"}
+          {g.mode==="net"&&g.hcpRelative?" · 🆚 différentiel (match play)":g.mode==="net"?" · intégral":""}</div>
         <div style={{marginTop:8,fontSize:11,color:T.dim,fontWeight:700}}>DÉPARTS DU PARCOURS</div>
         <div style={{display:"flex",flexWrap:"wrap",gap:6,marginTop:4}}>
           {(course?.tees||[]).map(t=>(
@@ -1731,7 +1764,7 @@ function Briefing({g,course,playerById,onStart}){
             {" "}(SSS {t.cr} · Slope {t.slope})</div>
           {net && <div style={{marginTop:8}}>
             <div style={{fontSize:11,color:T.dim,marginBottom:4}}>
-              {chp===minChp?"🟢 Joueur de référence (0 coup rendu relatif)":
+              {chp<=0?"🟢 Joueur de référence (0 coup rendu)":
                 `Reçoit ${chp} coup(s) sur :`}</div>
             <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
               {holes.map(h=>(<span key={h.hole} style={{fontSize:11,padding:"3px 7px",
@@ -1788,8 +1821,8 @@ function SubGame({sg,course,mode,playerById,setScore,validateHole,done}){
   const [curHole,setCurHole]=useState(()=>{ // 1er trou non validé
     for(let i=0;i<18;i++) if(!(sg.validated||[]).includes(i)) return i; return 0;});
   const strokesByPlayer={};
-  ps.forEach(p=>{const t=teeData(course,p.tee);
-    const chp=courseHandicap(p.index,t.slope,t.cr,t.par);
+  ps.forEach(p=>{
+    const chp=effChp(p,ps,course,sg.hcpRelative);
     strokesByPlayer[p.id]=net?strokesPerHole(chp,course?.si):new Array(18).fill(0);});
   const allScored=h=>ps.every(p=>sg.scores?.[p.id]?.[h]!=null);
   const padPlayer=pad?ps.find(p=>p.id===pad.pid):null;
@@ -1835,7 +1868,7 @@ function SubGame({sg,course,mode,playerById,setScore,validateHole,done}){
               <div style={{flex:1,minWidth:0}}>
                 <div style={{fontWeight:700,fontSize:14}}>{dispName(p)}
                   {recv&&<span style={{color:"#3a7bd5",fontSize:11}}> ●{strokesByPlayer[p.id][h]>1?strokesByPlayer[p.id][h]:""} coup rendu</span>}</div>
-                <div style={{fontSize:10,color:T.dim}}>CHP {net?courseHandicap(p.index,teeData(course,p.tee).slope,teeData(course,p.tee).cr,teeData(course,p.tee).par):0}</div>
+                <div style={{fontSize:10,color:T.dim}}>CHP {net?effChp(p,ps,course,sg.hcpRelative):0}</div>
               </div>
               <button disabled={v} onClick={(e)=>{
                   if(active){setPad(null);return;}
@@ -2101,7 +2134,7 @@ function LiveBoard({sg,ps,course,net,result}){
     } else {
       // stableford / skins : recompute points par joueur sur trous validés
       rows=ps.map(p=>{
-        const t=teeData(course,p.tee);const chp=courseHandicap(p.index,t.slope,t.cr,t.par);
+        const chp=effChp(p,ps,course,sg.hcpRelative);
         const useNet=f==="stableford_gross"?false:net;
         const strokes=useNet?strokesPerHole(chp,course?.si):new Array(18).fill(0);
         let pts=0;
@@ -2114,7 +2147,7 @@ function LiveBoard({sg,ps,course,net,result}){
   } else {
     // coups nets (stroke/match) : plus petit = mieux
     rows=ps.map(p=>{
-      const t=teeData(course,p.tee);const chp=courseHandicap(p.index,t.slope,t.cr,t.par);
+      const chp=effChp(p,ps,course,sg.hcpRelative);
       const strokes=net?strokesPerHole(chp,course?.si):new Array(18).fill(0);
       let netTot=0,played=0;
       validated.forEach(h=>{const s=sg.scores?.[p.id]?.[h];if(s==null)return;played++;netTot+=s-strokes[h];});
@@ -2253,8 +2286,8 @@ function EventBoard({g,courses,playerById}){
 
 function computeSub(sg,ps,course,net){
   if(!course||!ps.length) return null;
-  const holes=(useNet)=>p=>{const t=teeData(course,p.tee);
-    const chp=courseHandicap(p.index,t.slope,t.cr,t.par);
+  const holes=(useNet)=>p=>{
+    const chp=effChp(p,ps,course,sg.hcpRelative);
     const strokes=strokesPerHole(chp,course.si);
     return Array.from({length:18},(_,i)=>{const g=sg.scores?.[p.id]?.[i];
       if(g==null) return null;return useNet?g-strokes[i]:g;});};
@@ -2388,8 +2421,8 @@ function computeSub(sg,ps,course,net){
 function playerScores(sg,ps,course,net){
   if(!course||!ps.length||ps.length<2) return {pts:{},h2h:[]};
   const useNet = sg.formula==="stableford_net"?true:sg.formula==="stableford_gross"?false:net;
-  const holeNet=p=>{const t=teeData(course,p.tee);
-    const chp=courseHandicap(p.index,t.slope,t.cr,t.par);
+  const holeNet=p=>{
+    const chp=effChp(p,ps,course,sg.hcpRelative);
     const strokes=strokesPerHole(chp,course.si);
     return Array.from({length:18},(_,i)=>{const g=sg.scores?.[p.id]?.[i];
       if(g==null) return null;return useNet?g-strokes[i]:g;});};
