@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, loadMyProfile, saveMyProfile, su
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.22 · brut-net"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.23 · equipes"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -193,6 +193,8 @@ function formulasFor(n){
 }
 // Formules qui se jouent uniquement en BRUT (pas de choix net) : on masque le 2e menu.
 const BRUT_ONLY=["mexicaine"];
+// Formules d'équipe 2 contre 2 : on demande qui joue avec qui.
+const TEAM_2V2=["fourball","foursome","mexicaine","scramble","matchplay2v2"];
 const FORMULA_LABELS={matchplay:"Match Play 1v1",strokeplay_net:"Stroke Play (net) 1v1",
   stableford:"Stableford",stableford_net:"Stableford Net",stableford_gross:"Stableford Brut",
   skins:"Skins (18 pts · report)",chouette:"Chouette (6 pts · 4/2/0)",
@@ -890,6 +892,7 @@ function NewGame({setTab}){
   const [over,setOver]=useState({});  // overrides {playerId:{index}} ajustables pour la partie
   const [split,setSplit]=useState(null);
   const [formula,setFormula]=useState(null);
+  const [teamOf,setTeamOf]=useState({}); // 2v2 : id joueur -> 0 (Équipe 1) ou 1 (Équipe 2)
   // Tournoi multi-manches : chaque manche a SON parcours ET SA répartition (formules)
   const [rounds,setRounds]=useState([{courseId:courses[0]?.id,split:null}]);
   const addRound=()=>setRounds([...rounds,{courseId:courses[0]?.id,
@@ -922,6 +925,10 @@ function NewGame({setTab}){
   // Mexicaine = toujours en brut : on force le mode (le 2e menu est masqué)
   const brutOnly=type==="simple"&&BRUT_ONLY.includes(formula);
   useEffect(()=>{if(brutOnly)setMode("gross");},[brutOnly]);// eslint-disable-line
+  // === Équipes 2 contre 2 : qui joue avec qui ===
+  const team2v2=type==="simple" && n===4 && TEAM_2V2.includes(formula);
+  const getTeam=(id,idx)=> teamOf[id]!==undefined ? teamOf[id] : (idx<2?0:1); // défaut : 2 premiers vs 2 derniers
+  const setTeam=(id,t)=>setTeamOf(o=>({...o,[id]:t}));
   // quand l'effectif change, (ré)initialise la répartition de chaque manche
   useEffect(()=>{if(type==="event"&&n>=2)
     setRounds(rs=>rs.map(r=>({...r,split:autoSplit(n)})));},[n,type]);// eslint-disable-line
@@ -944,14 +951,22 @@ function NewGame({setTab}){
       const toAdd=keepers.filter(k=>!existingIds.has(k.id));
       if(toAdd.length) setMembers([...members,...toAdd]);
     }
-    const roster=allPlayers.map(p=>({...p,tee:getTee(p.id),
+    // 2v2 : on classe les joueurs par équipe (Équipe 1 puis Équipe 2) pour le calcul
+    let ordered=allPlayers;
+    if(team2v2){
+      const t0=allPlayers.filter((p,i)=>getTeam(p.id,i)===0);
+      const t1=allPlayers.filter((p,i)=>getTeam(p.id,i)===1);
+      if(t0.length!==2||t1.length!==2) return alert("Forme 2 équipes de 2 joueurs.");
+      ordered=[...t0,...t1];
+    }
+    const roster=ordered.map((p,i)=>({...p,tee:getTee(p.id),
       index:getIndex(p),
-      team:type==="event"?null:undefined}));
+      team:type==="event"?null:(team2v2?(i<2?0:1):undefined)}));
     if(type==="simple"){
       const ids=roster.map(p=>p.id);
       const subgames=[{id:1,formula,players:ids,scores:{},validated:[],done:false,hcpRelative}];
       const game={id:Date.now(),name:finalName(),type,courseId,mode,roster,subgames,
-        hcpRelative,teamNames:null,done:false,created:Date.now()};
+        hcpRelative,teamNames:team2v2?["Équipe 1","Équipe 2"]:null,done:false,created:Date.now()};
       setGames([game,...games]);setTab("history");return;
     }
     // TOURNOI : chaque manche a SON parcours + SA répartition (formules choisies à la main)
@@ -1097,7 +1112,26 @@ function NewGame({setTab}){
         <select value={formula||""} onChange={e=>setFormula(e.target.value)} style={inp}>
           {simpleFormulas.map(f=><option key={f} value={f}>{FORMULA_LABELS[f]}</option>)}</select>
         {n===3&&formula==="chouette"&&<ChouetteInfo/>}
-        <Section>2. Décompte</Section>
+        {team2v2&&(()=>{
+          const c0=allPlayers.filter((p,i)=>getTeam(p.id,i)===0).length;
+          const ok=c0===2; // l'autre équipe a forcément les 2 restants
+          return (<>
+            <Section>2. Les équipes (2 contre 2)</Section>
+            <div style={{fontSize:11,color:T.dim,marginBottom:6}}>Désigne qui joue avec qui : touche une équipe pour chaque joueur.</div>
+            {allPlayers.map((p,i)=>{const t=getTeam(p.id,i);
+              return (<div key={p.id} style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+                <span style={{flex:1,fontWeight:700,fontSize:13}}>{dispName(p)}</span>
+                {[0,1].map(tt=>(<button key={tt} onClick={()=>setTeam(p.id,tt)}
+                  style={{...chip,padding:"7px 12px",fontSize:12,
+                  border:`2px solid ${t===tt?(tt===0?T.eu:T.us):T.line}`,
+                  background:t===tt?(tt===0?T.eu:T.us)+"22":T.panel,
+                  color:t===tt?T.text:T.dim,fontWeight:t===tt?800:600}}>
+                  {tt===0?"Équipe 1":"Équipe 2"}</button>))}
+              </div>);})}
+            {!ok&&<div style={{fontSize:11,color:T.gold,marginTop:2}}>⚠️ Il faut 2 joueurs par équipe.</div>}
+          </>);
+        })()}
+        <Section>{team2v2?"3.":"2."} Décompte</Section>
         {brutOnly
           ? <div style={{...card(T.gold),fontSize:12,color:T.dim,lineHeight:1.5}}>
               🌮 La <b style={{color:T.text}}>Mexicaine</b> se joue en <b style={{color:T.text}}>brut</b> :
@@ -2408,6 +2442,15 @@ function LiveBoard({sg,ps,course,net,result}){
         </div>}
         {anyValid && <div style={{textAlign:"center",fontFamily:"Anton",fontSize:18,
           color:T.gold,marginBottom:12}}>{rV?.summary}</div>}
+        {/* ⚡ FAITS DE JEU : événements spéciaux qui expliquent le score (mexicaine) */}
+        {anyValid && rV?.events?.length>0 && <div style={{borderTop:`1px solid ${T.line}`,
+          paddingTop:8,marginBottom:10}}>
+          <div style={{fontSize:10,color:T.dim,marginBottom:6,textTransform:"uppercase",
+            letterSpacing:.5,fontWeight:700}}>⚡ Faits de jeu</div>
+          {[...rV.events].reverse().slice(0,8).map((e,i)=>(
+            <div key={i} style={{fontSize:11,color:T.dim,marginBottom:3,lineHeight:1.35}}>
+              <b style={{color:T.text}}>Trou {e.h}</b> — {e.notes.join(" · ")}</div>))}
+        </div>}
         {/* STABLEFORD BRUT INDIVIDUEL (secondaire) */}
         {anyValid && <div style={{borderTop:`1px solid ${T.line}`,paddingTop:8}}>
           <div style={{fontSize:10,color:T.dim,marginBottom:6,textTransform:"uppercase",
@@ -2709,6 +2752,7 @@ function computeSub(sg,ps,course,net){
     // Puis bonus : par+par +5, birdie+birdie +10. Plus petit nombre gagne, écart = diff.
     const a=ps.slice(0,2),b=ps.slice(2,4);
     const pars=holePars(course);
+    const NA=a.map(p=>dispName(p)).join("/"),NB=b.map(p=>dispName(p)).join("/");
     const teamNum=(team,h,oppHasBirdie,parH)=>{
       // scores bruts des 2 joueurs, croix = par+4
       const raw=team.map(p=>{const g=sg.scores?.[p.id]?.[h];return g==null?null:g;});
@@ -2717,14 +2761,15 @@ function computeSub(sg,ps,course,net){
       const birdies=sc.filter(s=>s<parH).length;
       const lo=Math.min(...sc),hi=Math.max(...sc);
       let num=lo*10+hi;                 // meilleur en premier
+      let inverted=false,parPar=false,dd=false;
       // inversion : cette équipe n'a aucun birdie ET l'adversaire en a
-      if(birdies===0 && oppHasBirdie) num=hi*10+lo;
+      if(birdies===0 && oppHasBirdie){ num=hi*10+lo; inverted=true; }
       // bonus (après inversion)
-      if(sc[0]===parH&&sc[1]===parH) num+=5;            // par + par
-      if(sc.every(s=>s<parH)) num+=10;                   // birdie + birdie (2 birdies)
-      return {num,birdies};
+      if(sc[0]===parH&&sc[1]===parH){ num+=5; parPar=true; }    // par + par
+      if(sc.every(s=>s<parH)){ num+=10; dd=true; }              // birdie + birdie
+      return {num,birdies,inverted,parPar,dd};
     };
-    let cumA=0,cumB=0;
+    let cumA=0,cumB=0; const events=[];
     for(let h=0;h<18;h++){const parH=pars[h];
       // 1er passage : connaître les birdies de chaque équipe (avant inversion)
       const birds=(team)=>{const r=team.map(p=>sg.scores?.[p.id]?.[h]);
@@ -2735,10 +2780,17 @@ function computeSub(sg,ps,course,net){
       if(!na||!nb) continue;
       if(na.num<nb.num) cumA+=nb.num-na.num;
       else if(nb.num<na.num) cumB+=na.num-nb.num;
+      // ÉVÉNEMENTS SPÉCIAUX du trou (pour expliquer le score)
+      const ev=[];
+      if(na.inverted) ev.push(`🔄 ${NA} : score inversé (birdie adverse)`);
+      if(nb.inverted) ev.push(`🔄 ${NB} : score inversé (birdie adverse)`);
+      if(na.dd) ev.push(`🐦🐦 ${NA} : 2 birdies (+10)`); else if(na.parPar) ev.push(`🎯 ${NA} : par+par (+5)`);
+      if(nb.dd) ev.push(`🐦🐦 ${NB} : 2 birdies (+10)`); else if(nb.parPar) ev.push(`🎯 ${NB} : par+par (+5)`);
+      if(ev.length) events.push({h:h+1,notes:ev});
     }
-    const A=a.map(p=>dispName(p)).join("/"),B=b.map(p=>dispName(p)).join("/");
+    const A=NA,B=NB;
     const lead=cumA>cumB?`${A} mène ${cumA}–${cumB} pts`:cumB>cumA?`${B} mène ${cumB}–${cumA} pts`:`Égalité ${cumA}–${cumB} pts`;
-    return {summary:lead,winner:cumA>cumB?A:cumB>cumA?B:null,mexA:cumA,mexB:cumB};
+    return {summary:lead,winner:cumA>cumB?A:cumB>cumA?B:null,mexA:cumA,mexB:cumB,events};
   }
   if(f==="fourball"||f==="foursome"||f==="scramble"){
     const a=ps.slice(0,2),b=ps.slice(2,4);
