@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, loadMyProfile, saveMyProfile, su
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.19 · faq formules"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.20 · faq rubriques"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -629,35 +629,61 @@ function AccountTab(){
 
 // "Comment ça marche" : présentation + FAQ, accessible à tous (onboarding des potes).
 function FaqTab(){
-  const items=[
-    ["👋 Première connexion","Sur l'accueil « Qui es-tu ? », tape sur ton prénom. À ta 1re fois, tu remplis ta fiche UNE seule fois (surnom, index de jeu, mobile, email). C'est tout."],
-    ["🔑 Te reconnecter (mot de passe « soft »)","Les fois suivantes, on te demande ton index de la dernière connexion : c'est ton mot de passe. Si tu as progressé, tu saisis ton nouvel index — il devient la référence pour la prochaine fois."],
-    ["👤 Mon compte","Bouton 👤 en haut : tu peux changer ton surnom, ton index, ton mobile, ton email ou ta préférence de notif quand tu veux."],
-    ["⛳ Lancer une partie","Onglet ➕ Nouvelle : choisis le parcours, les joueurs (et invités), la formule, Net ou Brut. Pour du match play, coche « Coups rendus en différentiel »."],
-    ["🎯 Comment on compte les points (2 niveaux)","Deux choses distinctes : (1) le RÉSULTAT de la partie — qui gagne, dans le langage de la formule choisie ; (2) les POINTS DE SAISON — un système de DUELS identique pour TOUTES les formules, qui alimente le classement annuel. Rappel : une partie non validée = 0 point. (Le net = score brut − coups rendus selon l'index du trou.)"],
-    ["🎮 Formules à 2 joueurs","• Match Play 1v1 : le net le plus bas gagne le trou → statut 1 UP / All Square / 2&1 (plié quand l'avance dépasse les trous restants). • Stroke Play net : plus petit total de coups nets. • Stableford (net ou brut) : eagle 4 · birdie 3 · par 2 · bogey 1 · double+ 0. • Skins : 1 pt par trou au net le plus bas ; égalité → le point se REPORTE sur le trou suivant."],
-    ["🎮 Formules à 3 joueurs","• Chouette (6 pts/trou) selon les 3 nets : 4/2/0 si tous différents · 3/3/0 (égalité 1er) · 4/1/1 (égalité 2e) · 2/2/2 (les 3 à égalité). • 1v1v1 : le net le plus bas du trou prend 1 pt (partagé si égalité). • Stableford et Skins : comme à 2 joueurs."],
-    ["🎮 Formules à 4 joueurs (2 contre 2)","On compare le MEILLEUR net de chaque équipe, trou par trou. • Fourball (meilleure balle), Foursome/Greensome, Scramble : match play d'équipe. • Match Play 2v2 : statut UP / All Square / 2&1. • Mexicaine (en brut) : nombre à 2 chiffres par trou (meilleur en 1er) + bonus (par+par, 2 birdies) et règle d'inversion ; le plus petit nombre gagne le trou et l'écart s'accumule."],
-    ["🗺️ Les parcours (tout est modifiable !)","15 parcours sont déjà préchargés. Tu peux en créer d'autres : l'appli sait chercher dans la base mondiale GolfCourseAPI (tous n'y sont pas), ou tu ajoutes un parcours à la main. Et TOUT est éditable dans l'onglet Parcours : si un index de trou (HCP), un par ou un slope est inexact, corrige-le UNE fois → c'est mémorisé pour toutes les parties suivantes. Rien d'irréversible, mais SOYEZ RIGOUREUX : on ne flingue pas les parcours du groupe (sinon c'est chiant à rattraper 😅). Merci 🙏"],
-    ["✍️ Le scoreur","Dans chaque partie, on désigne qui « tient la carte » (le scoreur). À plusieurs parties simultanées, chaque partie a SON scoreur. Lui seul saisit les scores."],
-    ["👀 Suivre en direct","Les autres joueurs ouvrent la même partie et suivent l'avancée en direct, en lecture seule. À la saisie, on ne voit que SA partie (bouton pour voir les autres)."],
-    ["🏅 Les points (classement de saison)","On compte les DUELS (qui bat qui) : 1v1 → Victoire 3 · Nul 1 · Défaite 0. À 3 → 2 duels (V 2) : battre les 2 = 4. Double 2v2 → V 3 chacun. Indépendant de la formule de jeu."],
-    ["🏆 Les tournois","Chaque manche compte, ET le vainqueur du tournoi gagne +5 (trophée). En équipe (Ryder), on est SOLIDAIRES : on gagne et on perd ensemble, pas de carte individuelle."],
-    ["📊 Deux classements","« Cumulé » (qui joue plus marque plus) et « Moyenne par partie » (pour que ceux qui jouent peu aient leur chance). + le bilan des confrontations directes entre potes."],
-    ["💬 Partage WhatsApp","À la fin d'une partie (validation du 18e trou), tu vois le vainqueur, les points et l'évolution au classement — et tu partages tout au groupe en un clic."],
-    ["🔒 Réglages","Le menu ⚙️ (clé API parcours, lien du groupe WhatsApp) est réservé à l'organisateur, pour que personne n'efface un réglage par erreur."],
+  const groups=[
+    ["🚀 Démarrer",[
+      ["👋 Première connexion","Sur l'accueil « Qui es-tu ? », tape sur ton prénom. À ta 1re fois, tu remplis ta fiche UNE seule fois (surnom, index de jeu, mobile, email). C'est tout."],
+      ["🔑 Te reconnecter (mot de passe « soft »)","Les fois suivantes, on te demande ton index de la dernière connexion : c'est ton mot de passe. Si tu as progressé, saisis ton nouvel index — il devient la référence pour la prochaine fois."],
+      ["👤 Mon compte","Bouton 👤 en haut : change ton surnom, ton index, ton mobile, ton email ou ta préférence de notif quand tu veux."],
+    ]],
+    ["⛳ Jouer une partie",[
+      ["➕ Lancer une partie","Onglet Nouvelle : choisis le parcours, les joueurs (et invités), la formule, Net ou Brut. Pour du match play, coche « Coups rendus en différentiel »."],
+      ["✍️ Le scoreur","Dans chaque partie, on désigne qui « tient la carte » (le scoreur). À plusieurs parties simultanées, chaque partie a SON scoreur. Lui seul saisit les scores."],
+      ["👀 Suivre en direct","Les autres joueurs ouvrent la même partie et suivent l'avancée en direct, en lecture seule. À la saisie, on ne voit que SA partie (bouton pour voir les autres)."],
+      ["🗺️ Les parcours (tout est modifiable !)","15 parcours sont préchargés. Tu peux en créer d'autres : recherche dans la base mondiale GolfCourseAPI (tous n'y sont pas), ou ajout à la main. Et TOUT est éditable : si un index de trou (HCP), un par ou un slope est inexact, corrige-le UNE fois → c'est mémorisé pour toujours. Rien d'irréversible, mais SOYEZ RIGOUREUX : on ne flingue pas les parcours du groupe 🙏"],
+    ]],
+    ["🎮 Les formules de jeu",[
+      ["🎯 2 niveaux de points","Deux choses distinctes : (1) le RÉSULTAT de la partie — qui gagne, dans le langage de la formule ; (2) les POINTS DE SAISON — un système de DUELS identique pour TOUTES les formules, qui alimente le classement. Une partie non validée = 0 point. (Net = brut − coups rendus.)"],
+      ["👥 À 2 joueurs","• Match Play 1v1 : le net le plus bas gagne le trou → 1 UP / All Square / 2&1. • Stroke Play net : plus petit total de coups nets. • Stableford (net ou brut) : eagle 4 · birdie 3 · par 2 · bogey 1 · double+ 0. • Skins : 1 pt/trou au net le plus bas ; égalité → le point se REPORTE au trou suivant."],
+      ["👥 À 3 joueurs","• Chouette (6 pts/trou) selon les 3 nets : 4/2/0 si tous différents · 3/3/0 (égalité 1er) · 4/1/1 (égalité 2e) · 2/2/2 (les 3 à égalité). • 1v1v1 : le net le plus bas du trou prend 1 pt (partagé si égalité). • Stableford et Skins : comme à 2."],
+      ["👥👥 À 4 joueurs (2 contre 2)","On compare le MEILLEUR net de chaque équipe, trou par trou. • Fourball, Foursome/Greensome, Scramble : match play d'équipe. • Match Play 2v2 : UP / All Square / 2&1. • Mexicaine (brut) : nombre à 2 chiffres/trou + bonus (par+par, 2 birdies) et inversion ; le plus petit gagne, l'écart s'accumule."],
+    ]],
+    ["🏅 Le championnat",[
+      ["🏅 Les points de saison (duels)","On compte les DUELS (qui bat qui) : 1v1 → Victoire 3 · Nul 1 · Défaite 0. À 3 → 2 duels (V 2) : battre les 2 = 4. Double 2v2 → V 3 chacun. Indépendant de la formule de jeu."],
+      ["🏆 Les tournois","Chaque manche compte, ET le vainqueur du tournoi gagne +5 (trophée). En équipe (Ryder), on est SOLIDAIRES : on gagne et on perd ensemble, pas de carte individuelle."],
+      ["📊 Deux classements","« Cumulé » (qui joue plus marque plus) et « Moyenne par partie » (pour que ceux qui jouent peu aient leur chance). + le bilan des confrontations directes entre potes."],
+    ]],
+    ["📲 Communication & réglages",[
+      ["💬 Partage WhatsApp","À la fin d'une partie (validation du 18e trou), tu vois le vainqueur, les points et l'évolution au classement — et tu partages tout au groupe en un clic."],
+      ["🔒 Réglages","Le menu ⚙️ (clé API parcours, lien du groupe WhatsApp) est réservé à l'organisateur, pour que personne n'efface un réglage par erreur."],
+    ]],
   ];
+  const [open,setOpen]=useState(0); // accordéon : index de rubrique ouverte (-1 = toutes fermées)
   return (
     <div>
       <Section>Comment ça marche</Section>
       <div style={{...card(T.accent),fontSize:13,color:T.text,lineHeight:1.5,marginBottom:12}}>
         Bienvenue chez <b>Du Golf & des Amis</b> ⛳ — l'appli pour jouer, scorer en direct et
-        suivre le classement de la saison entre potes. Voici l'essentiel :</div>
-      {items.map(([t,d],i)=>(
-        <div key={i} style={{...card(T.line),marginBottom:8}}>
-          <div style={{fontWeight:800,marginBottom:4}}>{t}</div>
-          <div style={{fontSize:13,color:T.dim,lineHeight:1.5}}>{d}</div>
-        </div>))}
+        suivre le classement entre potes. <b>Touche une rubrique pour la déplier.</b></div>
+      {groups.map(([title,items],gi)=>{
+        const isOpen=open===gi;
+        return (
+          <div key={gi} style={{marginBottom:8}}>
+            <div onClick={()=>setOpen(isOpen?-1:gi)} style={{...card(T.line),cursor:"pointer",
+              marginBottom:isOpen?6:0,display:"flex",justifyContent:"space-between",
+              alignItems:"center",background:isOpen?`${T.accent}14`:T.panel,
+              border:`1.5px solid ${isOpen?T.accent+"66":T.line}`}}>
+              <span style={{fontWeight:800,fontSize:15}}>{title}</span>
+              <span style={{color:isOpen?T.accent:T.dim,fontSize:13}}>
+                {isOpen?"▾ fermer":`▸ ${items.length}`}</span>
+            </div>
+            {isOpen && items.map(([t,d],i)=>(
+              <div key={i} style={{...card(T.line),marginBottom:6,marginLeft:6}}>
+                <div style={{fontWeight:800,marginBottom:4,fontSize:14}}>{t}</div>
+                <div style={{fontSize:13,color:T.dim,lineHeight:1.5}}>{d}</div>
+              </div>))}
+          </div>
+        );
+      })}
       <div style={{fontSize:11,color:T.dim,textAlign:"center",marginTop:10,marginBottom:20}}>
         Une question en plus ? Demande à l'organisateur 😉</div>
     </div>
