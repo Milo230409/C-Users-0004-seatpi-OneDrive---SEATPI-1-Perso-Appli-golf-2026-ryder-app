@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, loadMyProfile, saveMyProfile, su
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.21 · parcours vide"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.22 · brut-net"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -185,11 +185,14 @@ const GolfAPI={
 };
 
 function formulasFor(n){
-  if(n===2) return ["matchplay","strokeplay_net","stableford_net","stableford_gross","skins"];
-  if(n===3) return ["chouette","onevonevone","stableford_net","stableford_gross","skins"];
-  if(n===4) return ["fourball","foursome","mexicaine","scramble","stableford_net","stableford_gross","matchplay2v2"];
-  return ["stableford_net"];
+  // Stableford apparaît UNE fois (le brut/net se choisit dans le 2e menu, pas ici).
+  if(n===2) return ["matchplay","strokeplay_net","stableford","skins"];
+  if(n===3) return ["chouette","onevonevone","stableford","skins"];
+  if(n===4) return ["fourball","foursome","mexicaine","scramble","stableford","matchplay2v2"];
+  return ["stableford"];
 }
+// Formules qui se jouent uniquement en BRUT (pas de choix net) : on masque le 2e menu.
+const BRUT_ONLY=["mexicaine"];
 const FORMULA_LABELS={matchplay:"Match Play 1v1",strokeplay_net:"Stroke Play (net) 1v1",
   stableford:"Stableford",stableford_net:"Stableford Net",stableford_gross:"Stableford Brut",
   skins:"Skins (18 pts · report)",chouette:"Chouette (6 pts · 4/2/0)",
@@ -916,6 +919,9 @@ function NewGame({setTab}){
   const simpleFormulas=n>=2&&n<=4?formulasFor(n):[];
   useEffect(()=>{if(simpleFormulas.length&&!simpleFormulas.includes(formula))
     setFormula(simpleFormulas[0]);},[n]);// eslint-disable-line
+  // Mexicaine = toujours en brut : on force le mode (le 2e menu est masqué)
+  const brutOnly=type==="simple"&&BRUT_ONLY.includes(formula);
+  useEffect(()=>{if(brutOnly)setMode("gross");},[brutOnly]);// eslint-disable-line
   // quand l'effectif change, (ré)initialise la répartition de chaque manche
   useEffect(()=>{if(type==="event"&&n>=2)
     setRounds(rs=>rs.map(r=>({...r,split:autoSplit(n)})));},[n,type]);// eslint-disable-line
@@ -964,6 +970,29 @@ function NewGame({setTab}){
     setGames([game,...games]);setTab("history");
   };
 
+  // 2e menu : brut/net + case « différentiel ». Réutilisé pour partie simple et tournoi.
+  const decompteUI=(<>
+    <Field label="Brut ou Net ?"><select value={mode} onChange={e=>setMode(e.target.value)}
+      style={inp}><option value="net">Net (coups rendus)</option>
+      <option value="gross">Brut</option></select></Field>
+    {mode==="net" && (
+      <div onClick={()=>setHcpRelative(v=>!v)} style={{...card(hcpRelative?T.accent:T.line),
+        cursor:"pointer",display:"flex",gap:10,alignItems:"flex-start",marginTop:2}}>
+        <div style={{width:22,height:22,borderRadius:6,flexShrink:0,marginTop:1,
+          border:`2px solid ${hcpRelative?T.accent:T.line}`,
+          background:hcpRelative?T.accent:"transparent",color:T.ink,
+          display:"flex",alignItems:"center",justifyContent:"center",
+          fontWeight:900,fontSize:14}}>{hcpRelative?"✓":""}</div>
+        <div>
+          <div style={{fontWeight:800,fontSize:13}}>Coups rendus en différentiel (match play)</div>
+          <div style={{fontSize:11,color:T.dim,marginTop:2,lineHeight:1.4}}>
+            Coché : on rend l'<b>écart</b> entre joueurs sur les trous les plus durs
+            (le plus bas joue à 0). Décoché : chacun reçoit son total complet (stroke play).</div>
+        </div>
+      </div>
+    )}
+  </>);
+
   return (
     <div>
       <Section>{type==="simple"?"Nouvelle partie amicale":"Nouveau tournoi"}</Section>
@@ -1008,27 +1037,6 @@ function NewGame({setTab}){
         <button onClick={addRound} style={{...delBtn,width:"100%",padding:"8px",
           color:T.accent,borderColor:T.accent}}>+ Ajouter une manche</button>
       </>)}
-      <Field label="Décompte"><select value={mode} onChange={e=>setMode(e.target.value)}
-        style={inp}><option value="net">Net (coups rendus)</option>
-        <option value="gross">Brut</option></select></Field>
-
-      {mode==="net" && (
-        <div onClick={()=>setHcpRelative(v=>!v)} style={{...card(hcpRelative?T.accent:T.line),
-          cursor:"pointer",display:"flex",gap:10,alignItems:"flex-start",marginTop:2}}>
-          <div style={{width:22,height:22,borderRadius:6,flexShrink:0,marginTop:1,
-            border:`2px solid ${hcpRelative?T.accent:T.line}`,
-            background:hcpRelative?T.accent:"transparent",color:T.ink,
-            display:"flex",alignItems:"center",justifyContent:"center",
-            fontWeight:900,fontSize:14}}>{hcpRelative?"✓":""}</div>
-          <div>
-            <div style={{fontWeight:800,fontSize:13}}>Coups rendus en différentiel (match play)</div>
-            <div style={{fontSize:11,color:T.dim,marginTop:2,lineHeight:1.4}}>
-              Coché : on rend l'<b>écart</b> entre joueurs sur les trous les plus durs
-              (le plus bas joue à 0). Décoché : chacun reçoit son total complet (stroke play).</div>
-          </div>
-        </div>
-      )}
-
       <Section>Membres</Section>
       <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
         {members.map(m=>(<button key={m.id} onClick={()=>toggle(m.id)} style={{...chip,
@@ -1085,10 +1093,16 @@ function NewGame({setTab}){
         fontSize:13}}>👥 {n} joueur{n>1?"s":""} sélectionné{n>1?"s":""}</div>
 
       {type==="simple"&&(n>=2&&n<=4?(<>
-        <Section>Formule ({n} joueurs)</Section>
+        <Section>1. Formule ({n} joueurs)</Section>
         <select value={formula||""} onChange={e=>setFormula(e.target.value)} style={inp}>
           {simpleFormulas.map(f=><option key={f} value={f}>{FORMULA_LABELS[f]}</option>)}</select>
         {n===3&&formula==="chouette"&&<ChouetteInfo/>}
+        <Section>2. Décompte</Section>
+        {brutOnly
+          ? <div style={{...card(T.gold),fontSize:12,color:T.dim,lineHeight:1.5}}>
+              🌮 La <b style={{color:T.text}}>Mexicaine</b> se joue en <b style={{color:T.text}}>brut</b> :
+              système de <b style={{color:T.text}}>points cumulés</b> (pas de net, pas de match play).</div>
+          : decompteUI}
       </>):n>4?<Warn>Partie amicale = 2 à 4 joueurs. Passe en "Tournoi" pour {n}.</Warn>:null)}
 
       {type==="event"&&n>=2&&(<>
@@ -1121,6 +1135,8 @@ function NewGame({setTab}){
         <div style={{...card(T.eu),fontSize:12,color:T.dim,marginTop:4}}>
           ℹ️ Les joueurs démarrent <b>non affectés</b>. Tu formeras les équipes
           (Équipe 1 / Équipe 2, renommables) dans le détail du tournoi.</div>
+        <Section>Décompte</Section>
+        {decompteUI}
       </>)}
 
       <button onClick={create} style={{...addBtn,fontFamily:"'Archivo',sans-serif",fontSize:17,
@@ -2721,7 +2737,7 @@ function computeSub(sg,ps,course,net){
       else if(nb.num<na.num) cumB+=na.num-nb.num;
     }
     const A=a.map(p=>dispName(p)).join("/"),B=b.map(p=>dispName(p)).join("/");
-    const lead=cumA>cumB?`${A} mène ${cumA}–${cumB}`:cumB>cumA?`${B} mène ${cumB}–${cumA}`:`Égalité ${cumA}–${cumB}`;
+    const lead=cumA>cumB?`${A} mène ${cumA}–${cumB} pts`:cumB>cumA?`${B} mène ${cumB}–${cumA} pts`:`Égalité ${cumA}–${cumB} pts`;
     return {summary:lead,winner:cumA>cumB?A:cumB>cumA?B:null,mexA:cumA,mexB:cumB};
   }
   if(f==="fourball"||f==="foursome"||f==="scramble"){
