@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, loadMyProfile, saveMyProfile, su
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.16 · mp-board"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.17 · message"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -1845,13 +1845,21 @@ function ShareResults({g,courses,playerById}){
       }
       const ps=sg.players.map(playerById).filter(Boolean);
       const r=computeSub(sg,ps,c,net);
-      if(r)t+=`   ${FORMULA_LABELS[sg.formula]}\n   → ${r.summary}\n`;
+      if(r)t+=`🎲 ${FORMULA_LABELS[sg.formula]}\n→ ${r.summary}\n\n`;
+      // 👤 Fiche par joueur : médaille (ordre du résultat de la formule) + Stableford brut/net
+      const allH=Array.from({length:18},(_,i)=>i);
+      const {pts:fpts}=playerScores(sg,ps,c,net);
+      const fiche=ps.map(p=>({p,brut:stablefordBrut(sg,p,c,allH),net:stablefordNet(sg,p,c,allH),
+        f:fpts?.[p.id]||0})).sort((x,y)=>y.f-x.f||y.net-x.net);
+      const med=["🥇","🥈","🥉"];
+      fiche.forEach((x,i)=>{const m=med[i]||"";
+        t+=`👤 ${dispName(x.p)}${m?" "+m:""} · Stab ${x.brut} brut / ${x.net} net\n`;});
       // coups rendus par joueur (si partie en net)
       if(net && c){
         const cr=ps.map(p=>{
           const chp=effChp(p,ps,c,sg.hcpRelative);
           return `${dispName(p)} ${chp}`;}).join(" · ");
-        t+=`   🎯 Coups rendus : ${cr}\n`;
+        t+=`🎯 Coups rendus : ${cr}\n`;
       }
       t+=`\n`;
     });
@@ -2299,6 +2307,16 @@ function stablefordBrut(sg,p,course,validated){
   const pars=holePars(course);let pts=0;
   validated.forEach(h=>{const g=sg.scores?.[p.id]?.[h];if(g==null)return;
     const d=g-pars[h]; // vs par (brut)
+    pts+=d<=-2?4:d===-1?3:d===0?2:d===1?1:0;});
+  return pts;
+}
+function stablefordNet(sg,p,course,validated){
+  // stableford NET : score net = brut - coups rendus (handicap de jeu absolu du joueur)
+  const chp=effChp(p,[p],course,false);
+  const strokes=strokesPerHole(chp,course?.si||[]);
+  const pars=holePars(course);let pts=0;
+  validated.forEach(h=>{const g=sg.scores?.[p.id]?.[h];if(g==null)return;
+    const s=g-(strokes[h]||0),d=s-pars[h];
     pts+=d<=-2?4:d===-1?3:d===0?2:d===1?1:0;});
   return pts;
 }
