@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, loadMyProfile, saveMyProfile, su
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.17 · message"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.18 · clean"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -2628,8 +2628,7 @@ function computeSub(sg,ps,course,net){
       }
     }
     const rank=ps.map(p=>({name:dispName(p),pts:pts[p.id]})).sort((x,y)=>y.pts-x.pts);
-    const note=litiges?`  ⚖️ ${litiges} litige(s) — points partagés`:"";
-    return {pts,summary:rank.map(r=>`${r.name} ${r.pts}`).join(" · ")+note,
+    return {pts,summary:rank.map(r=>`${r.name} ${r.pts}`).join(" · "),
       winner:rank[0]?.name,litiges};
   }
   if(f==="matchplay"||f==="matchplay2v2"){
