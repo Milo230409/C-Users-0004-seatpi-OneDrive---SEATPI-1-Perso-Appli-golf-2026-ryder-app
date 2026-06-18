@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, loadMyProfile, saveMyProfile, su
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.18 · clean"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.19 · faq formules"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -634,6 +634,10 @@ function FaqTab(){
     ["🔑 Te reconnecter (mot de passe « soft »)","Les fois suivantes, on te demande ton index de la dernière connexion : c'est ton mot de passe. Si tu as progressé, tu saisis ton nouvel index — il devient la référence pour la prochaine fois."],
     ["👤 Mon compte","Bouton 👤 en haut : tu peux changer ton surnom, ton index, ton mobile, ton email ou ta préférence de notif quand tu veux."],
     ["⛳ Lancer une partie","Onglet ➕ Nouvelle : choisis le parcours, les joueurs (et invités), la formule, Net ou Brut. Pour du match play, coche « Coups rendus en différentiel »."],
+    ["🎯 Comment on compte les points (2 niveaux)","Deux choses distinctes : (1) le RÉSULTAT de la partie — qui gagne, dans le langage de la formule choisie ; (2) les POINTS DE SAISON — un système de DUELS identique pour TOUTES les formules, qui alimente le classement annuel. Rappel : une partie non validée = 0 point. (Le net = score brut − coups rendus selon l'index du trou.)"],
+    ["🎮 Formules à 2 joueurs","• Match Play 1v1 : le net le plus bas gagne le trou → statut 1 UP / All Square / 2&1 (plié quand l'avance dépasse les trous restants). • Stroke Play net : plus petit total de coups nets. • Stableford (net ou brut) : eagle 4 · birdie 3 · par 2 · bogey 1 · double+ 0. • Skins : 1 pt par trou au net le plus bas ; égalité → le point se REPORTE sur le trou suivant."],
+    ["🎮 Formules à 3 joueurs","• Chouette (6 pts/trou) selon les 3 nets : 4/2/0 si tous différents · 3/3/0 (égalité 1er) · 4/1/1 (égalité 2e) · 2/2/2 (les 3 à égalité). • 1v1v1 : le net le plus bas du trou prend 1 pt (partagé si égalité). • Stableford et Skins : comme à 2 joueurs."],
+    ["🎮 Formules à 4 joueurs (2 contre 2)","On compare le MEILLEUR net de chaque équipe, trou par trou. • Fourball (meilleure balle), Foursome/Greensome, Scramble : match play d'équipe. • Match Play 2v2 : statut UP / All Square / 2&1. • Mexicaine (en brut) : nombre à 2 chiffres par trou (meilleur en 1er) + bonus (par+par, 2 birdies) et règle d'inversion ; le plus petit nombre gagne le trou et l'écart s'accumule."],
     ["🗺️ Les parcours (tout est modifiable !)","15 parcours sont déjà préchargés. Tu peux en créer d'autres : l'appli sait chercher dans la base mondiale GolfCourseAPI (tous n'y sont pas), ou tu ajoutes un parcours à la main. Et TOUT est éditable dans l'onglet Parcours : si un index de trou (HCP), un par ou un slope est inexact, corrige-le UNE fois → c'est mémorisé pour toutes les parties suivantes. Rien d'irréversible, mais SOYEZ RIGOUREUX : on ne flingue pas les parcours du groupe (sinon c'est chiant à rattraper 😅). Merci 🙏"],
     ["✍️ Le scoreur","Dans chaque partie, on désigne qui « tient la carte » (le scoreur). À plusieurs parties simultanées, chaque partie a SON scoreur. Lui seul saisit les scores."],
     ["👀 Suivre en direct","Les autres joueurs ouvrent la même partie et suivent l'avancée en direct, en lecture seule. À la saisie, on ne voit que SA partie (bouton pour voir les autres)."],
