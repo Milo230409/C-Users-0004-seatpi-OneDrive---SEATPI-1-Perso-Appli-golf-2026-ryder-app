@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, loadMyProfile, saveMyProfile, su
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.24 · niveau"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.25 · droits"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -363,16 +363,23 @@ export default function App(){
   );
 }
 
-// RECONNEXION : on confirme simplement « c'est bien toi », puis on vérifie/ajuste son
-// index / niveau de jeu — qui sert UNIQUEMENT à calculer les coups rendus (il doit refléter
-// le niveau réel, donc être librement ajustable ; ce n'est PAS un mot de passe).
+// RECONNEXION en 2 temps : (1) petite sécurité — saisis ton index / niveau de la DERNIÈRE
+// connexion (sans le connaître, on n'entre pas sur le compte d'un autre) ; (2) confirme/ajuste
+// ton niveau du JOUR (il sert uniquement aux coups rendus et doit refléter ton vrai niveau).
 function SoftLogin({player,onOk,onCancel}){
   const ref=parseFloat(player.index)||0;
-  const [niv,setNiv]=useState(String(ref));
+  const [step,setStep]=useState("check");
+  const [val,setVal]=useState("");
+  const [newIdx,setNewIdx]=useState(String(ref));
   const [err,setErr]=useState("");
+  const check=()=>{
+    if(val.trim()==="") return setErr("Saisis ton index / niveau de la dernière connexion.");
+    if(Math.abs(parseFloat(val)-ref)<0.05){ setErr(""); setStep("update"); }
+    else setErr("Niveau incorrect — c'est ton index / niveau de la dernière connexion (petite sécurité).");
+  };
   const finish=()=>{
-    const ni=parseFloat(niv);
-    if(Number.isNaN(ni)) return setErr("Indique ton index / niveau de jeu.");
+    const ni=parseFloat(newIdx);
+    if(Number.isNaN(ni)) return setErr("Indique ton niveau du jour.");
     onOk(ni);
   };
   return (
@@ -381,16 +388,28 @@ function SoftLogin({player,onOk,onCancel}){
       <CrestLogo size={80}/>
       <div style={{fontFamily:"'Archivo',sans-serif",fontWeight:900,fontSize:22,marginTop:12}}>
         Content de te revoir, {dispName(player)} 👋</div>
-      <div style={{fontSize:13,color:T.dim,marginTop:8,marginBottom:18,lineHeight:1.5}}>
-        Vérifie que c'est bien <b style={{color:T.text}}>toi</b>, puis confirme ton
-        {" "}<b style={{color:T.text}}>index / niveau de jeu</b> — il sert seulement à calculer
-        tes <b style={{color:T.text}}>coups rendus</b>. Ajuste-le si tu as progressé.</div>
-      <Field label="Mon index / niveau de jeu">
-        <input type="number" step="0.1" value={niv} autoFocus
-          onChange={e=>setNiv(e.target.value)} onKeyDown={e=>e.key==="Enter"&&finish()}
-          placeholder="ex: 15.4" style={inp}/></Field>
-      {err&&<div style={{color:T.gold,fontSize:12,marginTop:8}}>{err}</div>}
-      <button onClick={finish} style={addBtn}>✅ C'est moi, entrer</button>
+      {step==="check" ? <>
+        <div style={{fontSize:13,color:T.dim,marginTop:8,marginBottom:18,lineHeight:1.5}}>
+          Petite sécurité : saisis ton <b style={{color:T.text}}>index / niveau de jeu de ta
+          dernière connexion</b> pour confirmer que c'est bien toi.</div>
+        <Field label="Index / niveau de la dernière connexion">
+          <input type="number" step="0.1" value={val} autoFocus
+            onChange={e=>setVal(e.target.value)} onKeyDown={e=>e.key==="Enter"&&check()}
+            placeholder="ex: 15.4" style={inp}/></Field>
+        {err&&<div style={{color:T.gold,fontSize:12,marginTop:8}}>{err}</div>}
+        <button onClick={check} style={addBtn}>Confirmer</button>
+      </> : <>
+        <div style={{fontSize:13,color:T.accent,marginTop:8,fontWeight:800}}>✅ C'est bien toi !</div>
+        <div style={{fontSize:13,color:T.dim,marginTop:6,marginBottom:18,lineHeight:1.5}}>
+          Confirme ou ajuste ton <b style={{color:T.text}}>niveau du jour</b> (tu as peut-être
+          progressé). Il sert uniquement à calculer tes <b style={{color:T.text}}>coups rendus</b>.</div>
+        <Field label="Mon index / niveau aujourd'hui">
+          <input type="number" step="0.1" value={newIdx} autoFocus
+            onChange={e=>setNewIdx(e.target.value)} onKeyDown={e=>e.key==="Enter"&&finish()}
+            style={inp}/></Field>
+        {err&&<div style={{color:T.gold,fontSize:12,marginTop:8}}>{err}</div>}
+        <button onClick={finish} style={addBtn}>Entrer</button>
+      </>}
       <button onClick={onCancel} style={{...delBtn,width:"100%",marginTop:8,padding:"11px"}}>
         ← Ce n'est pas moi</button>
     </div></div>
@@ -900,6 +919,9 @@ function NewGame({setTab}){
   // index de jeu réel ajustable pour CETTE partie (défaut = valeur de la fiche)
   const getIndex=p=>over[p.id]?.index!==undefined?over[p.id].index:p.index;
   const setOverride=(pid,k,v)=>setOver({...over,[pid]:{...over[pid],[k]:v}});
+  // Membres G&A (toujours en chips) vs anciens invités/non-membres (liste déroulante)
+  const isFounder=m=>m.member===true||/^seed-/.test(String(m.id));
+  const others=members.filter(m=>!isFounder(m));
 
   const simpleFormulas=n>=2&&n<=4?formulasFor(n):[];
   useEffect(()=>{if(simpleFormulas.length&&!simpleFormulas.includes(formula))
@@ -1036,11 +1058,22 @@ function NewGame({setTab}){
       </>)}
       <Section>Membres</Section>
       <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
-        {members.map(m=>(<button key={m.id} onClick={()=>toggle(m.id)} style={{...chip,
-          border:`2px solid ${selected.includes(m.id)?T.accent:T.line}`,
-          background:selected.includes(m.id)?T.panel2:T.panel}}>
-          {dispName(m)} <span style={{color:T.dim}}>({m.index})</span></button>))}
+        {/* Membres G&A (toujours visibles) + anciens invités déjà sélectionnés */}
+        {members.filter(m=>isFounder(m)||selected.includes(m.id)).map(m=>(
+          <button key={m.id} onClick={()=>toggle(m.id)} style={{...chip,
+            border:`2px solid ${selected.includes(m.id)?T.accent:T.line}`,
+            background:selected.includes(m.id)?T.panel2:T.panel}}>
+            {dispName(m)} <span style={{color:T.dim}}>({m.index})</span>
+            {!isFounder(m)&&<span style={{color:T.gold,fontSize:9}}> invité</span>}</button>))}
       </div>
+      {others.filter(m=>!selected.includes(m.id)).length>0 &&
+        <select value="" onChange={e=>{const m=others.find(x=>String(x.id)===e.target.value);if(m)toggle(m.id);}}
+          style={{...inp,marginTop:8}}>
+          <option value="">+ Ajouter un ancien invité…</option>
+          {others.filter(m=>!selected.includes(m.id))
+            .sort((a,b)=>dispName(a).localeCompare(dispName(b)))
+            .map(m=><option key={m.id} value={m.id}>{dispName(m)} ({m.index})</option>)}
+        </select>}
 
       <Section>Invités</Section>
       {guests.map(g=>(<div key={g.id} style={card(T.gold)}>
@@ -1403,10 +1436,29 @@ function H2HTable({H,members}){
 }
 
 function PlayersTab(){
-  const {members,setMembers}=useContext(Ctx);
+  const {members,setMembers,admin}=useContext(Ctx);
   const upd=(id,k,v)=>setMembers(members.map(m=>m.id===id?{...m,[k]:v}:m));
   const del=id=>setMembers(members.filter(m=>m.id!==id));
   const add=()=>setMembers([...members,{id:Date.now(),name:"",nick:"",index:20}]);
+  // Lecture seule pour les non-admins : personne ne modifie la fiche d'un autre.
+  if(!admin){
+    return (
+      <div>
+        <Section>Joueurs membres ({members.length})</Section>
+        <div style={{...card(T.gold),fontSize:12,color:T.dim,lineHeight:1.5}}>
+          🔒 Les fiches des joueurs sont gérées par l'organisateur. Pour modifier
+          <b style={{color:T.text}}> TA</b> fiche (surnom, niveau…), va dans <b style={{color:T.text}}>👤 Mon compte</b>.</div>
+        {members.map(m=>(
+          <div key={m.id} style={{...card(T.line),display:"flex",alignItems:"center",gap:10}}>
+            <span style={{width:34,height:34,borderRadius:"50%",background:T.accent,color:T.ink,
+              display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,
+              flexShrink:0}}>{(dispName(m)[0]||"?").toUpperCase()}</span>
+            <span style={{flex:1,fontWeight:700}}>{dispName(m)}</span>
+            <span style={{color:T.dim,fontSize:13}}>index {m.index}</span>
+          </div>))}
+      </div>
+    );
+  }
   return (
     <div>
       <Section>Joueurs membres ({members.length})</Section>
@@ -1563,7 +1615,7 @@ function SettingsTab(){
 }
 
 function CoursesTab(){
-  const {courses,setCourses}=useContext(Ctx);
+  const {courses,setCourses,admin}=useContext(Ctx);
   const [q,setQ]=useState("");
   const upd=(id,k,v)=>setCourses(courses.map(c=>c.id===id?{...c,[k]:v}:c));
   const del=id=>setCourses(courses.filter(c=>c.id!==id));
@@ -1583,14 +1635,16 @@ function CoursesTab(){
       <input value={q} onChange={e=>setQ(e.target.value)}
         placeholder="🔍 Filtrer mes parcours…" style={inp}/>
       <button onClick={add} style={addBtn}>+ Ajouter un parcours (avance de phase)</button>
+      {!admin&&<div style={{fontSize:11,color:T.dim,marginTop:6,textAlign:"center"}}>
+        🔒 Tu peux créer et corriger des parcours. Seul l'organisateur peut en supprimer.</div>}
       <div style={{marginTop:10}}>
-        {filtered.map(c=><CourseCard key={c.id} c={c} upd={upd} del={del}/>)}
+        {filtered.map(c=><CourseCard key={c.id} c={c} upd={upd} del={del} admin={admin}/>)}
         {filtered.length===0&&<Empty text="Aucun parcours ne correspond."/>}
       </div>
     </div>
   );
 }
-function CourseCard({c,upd,del}){
+function CourseCard({c,upd,del,admin}){
   const setTees=tees=>upd(c.id,"tees",tees);
   const addTee=()=>{const preset=TEE_PRESETS[c.country]||TEE_PRESETS.France;
     const used=(c.tees||[]).map(t=>t.name);
@@ -1604,7 +1658,7 @@ function CourseCard({c,upd,del}){
       <div style={{display:"flex",gap:8}}>
         <input value={c.name} onChange={e=>upd(c.id,"name",e.target.value)}
           style={{...inp,fontWeight:800,flex:1}}/>
-        <button onClick={()=>del(c.id)} style={delBtn}>✕</button></div>
+        {admin&&<button onClick={()=>del(c.id)} style={delBtn} title="Supprimer (admin)">✕</button>}</div>
       <div style={{display:"flex",gap:8,marginTop:8}}>
         <Field label="Pays (norme couleurs)">
           <select value={c.country||"France"} onChange={e=>upd(c.id,"country",e.target.value)}
