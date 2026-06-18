@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, loadMyProfile, saveMyProfile, su
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.23 · equipes"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.24 · niveau"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -363,23 +363,16 @@ export default function App(){
   );
 }
 
-// "MOT DE PASSE SOFT" : pour revenir, le joueur confirme son index de la dernière
-// connexion (= son mot de passe). S'il est bon, il confirme/ met à jour son index du
-// jour (il a pu progresser) — ce nouvel index fera foi pour la prochaine connexion.
+// RECONNEXION : on confirme simplement « c'est bien toi », puis on vérifie/ajuste son
+// index / niveau de jeu — qui sert UNIQUEMENT à calculer les coups rendus (il doit refléter
+// le niveau réel, donc être librement ajustable ; ce n'est PAS un mot de passe).
 function SoftLogin({player,onOk,onCancel}){
   const ref=parseFloat(player.index)||0;
-  const [step,setStep]=useState("check");
-  const [val,setVal]=useState("");
-  const [newIdx,setNewIdx]=useState(String(ref));
+  const [niv,setNiv]=useState(String(ref));
   const [err,setErr]=useState("");
-  const check=()=>{
-    if(val.trim()==="") return setErr("Saisis ton index de la dernière connexion.");
-    if(Math.abs(parseFloat(val)-ref)<0.05){ setErr(""); setStep("update"); }
-    else setErr("Index incorrect. C'est l'index de ta dernière connexion qui sert de mot de passe.");
-  };
   const finish=()=>{
-    const ni=parseFloat(newIdx);
-    if(Number.isNaN(ni)) return setErr("Indique ton index du jour.");
+    const ni=parseFloat(niv);
+    if(Number.isNaN(ni)) return setErr("Indique ton index / niveau de jeu.");
     onOk(ni);
   };
   return (
@@ -388,30 +381,18 @@ function SoftLogin({player,onOk,onCancel}){
       <CrestLogo size={80}/>
       <div style={{fontFamily:"'Archivo',sans-serif",fontWeight:900,fontSize:22,marginTop:12}}>
         Content de te revoir, {dispName(player)} 👋</div>
-      {step==="check" ? <>
-        <div style={{fontSize:13,color:T.dim,marginTop:8,marginBottom:18,lineHeight:1.5}}>
-          Pour vérifier que c'est bien toi, saisis <b>ton index lors de ta dernière connexion</b>
-          {" "}(c'est ton « mot de passe »).</div>
-        <Field label="Index de la dernière connexion">
-          <input type="number" step="0.1" value={val} autoFocus
-            onChange={e=>setVal(e.target.value)} onKeyDown={e=>e.key==="Enter"&&check()}
-            placeholder="ex: 15.4" style={inp}/></Field>
-        {err&&<div style={{color:T.gold,fontSize:12,marginTop:8}}>{err}</div>}
-        <button onClick={check} style={addBtn}>Confirmer</button>
-      </> : <>
-        <div style={{fontSize:13,color:T.accent,marginTop:8,fontWeight:800}}>✅ C'est bien toi !</div>
-        <div style={{fontSize:13,color:T.dim,marginTop:6,marginBottom:18,lineHeight:1.5}}>
-          Confirme ton <b>index du jour</b> (tu as peut-être progressé). Il fera foi pour ta
-          prochaine connexion.</div>
-        <Field label="Mon index aujourd'hui">
-          <input type="number" step="0.1" value={newIdx} autoFocus
-            onChange={e=>setNewIdx(e.target.value)} onKeyDown={e=>e.key==="Enter"&&finish()}
-            style={inp}/></Field>
-        {err&&<div style={{color:T.gold,fontSize:12,marginTop:8}}>{err}</div>}
-        <button onClick={finish} style={addBtn}>Entrer</button>
-      </>}
+      <div style={{fontSize:13,color:T.dim,marginTop:8,marginBottom:18,lineHeight:1.5}}>
+        Vérifie que c'est bien <b style={{color:T.text}}>toi</b>, puis confirme ton
+        {" "}<b style={{color:T.text}}>index / niveau de jeu</b> — il sert seulement à calculer
+        tes <b style={{color:T.text}}>coups rendus</b>. Ajuste-le si tu as progressé.</div>
+      <Field label="Mon index / niveau de jeu">
+        <input type="number" step="0.1" value={niv} autoFocus
+          onChange={e=>setNiv(e.target.value)} onKeyDown={e=>e.key==="Enter"&&finish()}
+          placeholder="ex: 15.4" style={inp}/></Field>
+      {err&&<div style={{color:T.gold,fontSize:12,marginTop:8}}>{err}</div>}
+      <button onClick={finish} style={addBtn}>✅ C'est moi, entrer</button>
       <button onClick={onCancel} style={{...delBtn,width:"100%",marginTop:8,padding:"11px"}}>
-        ← Retour</button>
+        ← Ce n'est pas moi</button>
     </div></div>
   );
 }
@@ -419,7 +400,7 @@ function SoftLogin({player,onOk,onCancel}){
 function WhoAreYou({members,loaded,cloud,onPick,setMembers}){
   const [adding,setAdding]=useState(false);
   const [profileFor,setProfileFor]=useState(null); // joueur dont on complète la fiche
-  const [verifyFor,setVerifyFor]=useState(null);   // joueur en "MDP soft"
+  const [verifyFor,setVerifyFor]=useState(null);   // joueur en reconnexion
   const [nm,setNm]=useState("");
   // on n'affiche QUE les vrais profils : un invité jamais nommé n'est pas archivé/listé
   const realName=p=>p.name&&p.name.trim()&&p.name.trim().toLowerCase()!=="invité";
@@ -449,9 +430,9 @@ function WhoAreYou({members,loaded,cloud,onPick,setMembers}){
   const enterAs=(p)=>onPick({id:p.id,name:p.name,nick:p.nick,email:p.email,
     mobile:p.mobile,index:p.index,player:true});
   // 1re connexion (profil pas encore complété) → on remplit sa fiche une fois pour toutes.
-  // Connexions suivantes → "MDP soft" : surnom (affiché) + index de la dernière connexion.
+  // Reconnexion : on confirme juste l'identité + le niveau (pas de mot de passe).
   const choose=(p)=>{ if(p.profileDone) setVerifyFor(p); else setProfileFor(p); };
-  // MDP soft validé : met à jour l'index (qui fait foi la prochaine fois) puis entre
+  // Identité confirmée : on met à jour l'index / niveau (pour les coups rendus) puis on entre
   const softOk=(p,newIndex)=>{
     const updated={...p,index:newIndex,profileDone:true};
     if(setMembers) setMembers(members.map(m=>m.id===p.id?updated:m));
@@ -527,7 +508,7 @@ function ProfileForm({player,cloud,onDone,onCancel}){
   const [err,setErr]=useState("");
   const save=()=>{
     if(!name.trim()) return setErr("Indique ton prénom.");
-    if(index==="") return setErr("Indique ton index de jeu.");
+    if(index==="") return setErr("Indique ton index / niveau de jeu.");
     const updated={...player,name:name.trim(),nick:nick.trim(),
       mobile:mobile.trim(),email:email.trim(),index:parseFloat(index)||0,
       comm,profileDone:true};
@@ -547,7 +528,7 @@ function ProfileForm({player,cloud,onDone,onCancel}){
         placeholder="Prénom" style={inp}/></Field>
       <Field label="Surnom (affiché dans les parties)"><input value={nick}
         onChange={e=>setNick(e.target.value)} placeholder="ex: Trichatard" style={inp}/></Field>
-      <Field label="Index de jeu *"><input type="number" step="0.1" value={index}
+      <Field label="Index / niveau de jeu *"><input type="number" step="0.1" value={index}
         onChange={e=>setIndex(e.target.value)} placeholder="ex: 18.4" style={inp}/></Field>
       <Field label="Mobile"><input type="tel" value={mobile}
         onChange={e=>setMobile(e.target.value)} placeholder="06 12 34 56 78" style={inp}/></Field>
@@ -597,7 +578,7 @@ function AccountTab(){
   const [err,setErr]=useState("");
   const save=()=>{
     if(!name.trim()) return setErr("Indique ton prénom.");
-    if(index==="") return setErr("Indique ton index de jeu.");
+    if(index==="") return setErr("Indique ton index / niveau de jeu.");
     const updated={...me,id:user?.id??me.id,name:name.trim(),nick:nick.trim(),
       mobile:mobile.trim(),email:email.trim(),index:parseFloat(index)||0,comm,profileDone:true};
     const exists=members.some(m=>String(m.id)===String(updated.id));
@@ -609,13 +590,14 @@ function AccountTab(){
     <div>
       <Section>Mon compte</Section>
       <div style={{...card(T.gold),fontSize:12,color:T.dim,lineHeight:1.5}}>
-        Mets à jour tes infos quand tu veux. Ton <b style={{color:T.text}}>index</b> sert aussi
-        de « mot de passe » à ta prochaine connexion : si tu progresses, modifie-le ici.</div>
+        Mets à jour tes infos quand tu veux. Ton <b style={{color:T.text}}>index / niveau</b> sert
+        uniquement à calculer tes <b style={{color:T.text}}>coups rendus</b> : tiens-le à jour
+        pour qu'il reflète ton vrai niveau.</div>
       <Field label="Prénom"><input value={name} onChange={e=>setName(e.target.value)}
         placeholder="Prénom" style={inp}/></Field>
       <Field label="Surnom (affiché partout dans l'app)"><input value={nick}
         onChange={e=>setNick(e.target.value)} placeholder="ex: passe-partout" style={inp}/></Field>
-      <Field label="Index de jeu *"><input type="number" step="0.1" value={index}
+      <Field label="Index / niveau de jeu *"><input type="number" step="0.1" value={index}
         onChange={e=>setIndex(e.target.value)} placeholder="ex: 15.4" style={inp}/></Field>
       <Field label="Mobile"><input type="tel" value={mobile}
         onChange={e=>setMobile(e.target.value)} placeholder="06 12 34 56 78" style={inp}/></Field>
@@ -636,9 +618,9 @@ function AccountTab(){
 function FaqTab(){
   const groups=[
     ["🚀 Démarrer",[
-      ["👋 Première connexion","Sur l'accueil « Qui es-tu ? », tape sur ton prénom. À ta 1re fois, tu remplis ta fiche UNE seule fois (surnom, index de jeu, mobile, email). C'est tout."],
-      ["🔑 Te reconnecter (mot de passe « soft »)","Les fois suivantes, on te demande ton index de la dernière connexion : c'est ton mot de passe. Si tu as progressé, saisis ton nouvel index — il devient la référence pour la prochaine fois."],
-      ["👤 Mon compte","Bouton 👤 en haut : change ton surnom, ton index, ton mobile, ton email ou ta préférence de notif quand tu veux."],
+      ["👋 Première connexion","Sur l'accueil « Qui es-tu ? », tape sur ton prénom. À ta 1re fois, tu remplis ta fiche UNE seule fois (surnom, index / niveau de jeu, mobile, email). C'est tout."],
+      ["🔑 Te reconnecter","Les fois suivantes, tu tapes ton prénom et tu confirmes que c'est bien toi. On en profite pour vérifier ton index / niveau de jeu (tu l'ajustes si tu as progressé). ⚠️ L'index ne sert PAS de mot de passe : son seul rôle est de calculer les coups rendus, donc garde-le fidèle à ton vrai niveau."],
+      ["👤 Mon compte","Bouton 👤 en haut : change ton surnom, ton index / niveau, ton mobile, ton email ou ta préférence de notif quand tu veux."],
     ]],
     ["⛳ Jouer une partie",[
       ["➕ Lancer une partie","Onglet Nouvelle : choisis le parcours, les joueurs (et invités), la formule, Net ou Brut. Pour du match play, coche « Coups rendus en différentiel »."],
