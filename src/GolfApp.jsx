@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, loadMyProfile, saveMyProfile, su
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.15 · matchplay"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.16 · mp-board"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -2354,6 +2354,40 @@ function LiveBoard({sg,ps,course,net,result}){
                 <span style={{display:"inline-block",width:7,height:7,borderRadius:2,
                   background:r.team===0?T.eu:T.us,marginRight:6}}/>
                 {dispName(r.p)}</span>
+              <span style={{fontWeight:800,color:T.text}}>{r.stb} <span style={{fontSize:9,color:T.dim}}>pts</span></span>
+            </div>))}
+        </div>}
+      </div>
+    );
+  }
+
+  // ===== Affichage spécial MATCH PLAY 1v1 : STATUT en vedette + Stableford brut individuel =====
+  if(f==="matchplay" && ps.length===2){
+    const nameA=dispName(ps[0]),nameB=dispName(ps[1]);
+    const indiv=ps.map(p=>({p,stb:stablefordBrut(sg,p,course,validated)}));
+    return (
+      <div style={{marginTop:12,background:`linear-gradient(180deg,${T.panel2},${T.panel})`,
+        borderRadius:12,padding:12,border:`1px solid ${T.line}`}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+          <span style={{fontFamily:"Anton",fontSize:14,letterSpacing:.5}}>🏌️ MATCH PLAY</span>
+          <span style={{fontSize:10,color:T.dim}}>{validated.length} tr. validés</span></div>
+        {!anyValid && <div style={{fontSize:12,color:T.dim,textAlign:"center",padding:"8px 0"}}>
+          Valide des trous (bouton ✓) pour voir le statut du match…</div>}
+        {/* LE STATUT MATCH PLAY = donnée principale, en GROS */}
+        {anyValid && <div style={{textAlign:"center",padding:"16px 10px",borderRadius:14,
+          marginBottom:10,border:`2px solid ${(rV?.winner?T.gold:T.accent)}66`,
+          background:`${(rV?.winner?T.gold:T.accent)}14`}}>
+          <div style={{fontFamily:"Anton",fontSize:26,lineHeight:1.05,
+            color:rV?.winner?T.gold:T.accent}}>{rV?.summary}</div>
+          <div style={{fontSize:11,color:T.dim,marginTop:5}}>{nameA} vs {nameB}</div></div>}
+        {/* Scores individuels = secondaires, en Stableford BRUT (pas le total de coups) */}
+        {anyValid && <div style={{borderTop:`1px solid ${T.line}`,paddingTop:8}}>
+          <div style={{fontSize:10,color:T.dim,marginBottom:6,textTransform:"uppercase",
+            letterSpacing:.5,fontWeight:700}}>Stableford brut individuel</div>
+          {indiv.map(r=>(
+            <div key={r.p.id} style={{display:"flex",justifyContent:"space-between",
+              alignItems:"center",fontSize:12,marginBottom:4}}>
+              <span style={{color:T.dim}}>{dispName(r.p)}</span>
               <span style={{fontWeight:800,color:T.text}}>{r.stb} <span style={{fontSize:9,color:T.dim}}>pts</span></span>
             </div>))}
         </div>}
