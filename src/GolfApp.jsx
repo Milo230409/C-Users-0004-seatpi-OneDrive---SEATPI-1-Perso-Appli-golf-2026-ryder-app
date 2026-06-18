@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, loadMyProfile, saveMyProfile, su
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.14 · grille2"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.15 · matchplay"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -2434,9 +2434,13 @@ function LiveBoard({sg,ps,course,net,result}){
           </div>
         );
       })}
-      {(isTeam&&rV)&&<div style={{marginTop:4,fontSize:13,fontWeight:700,
+      {rV&&anyScore&&(f==="matchplay"||f==="matchplay2v2")&&
+        <div style={{marginTop:10,padding:"10px",borderRadius:10,background:T.bg,textAlign:"center",
+          fontWeight:800,fontSize:16,color:T.gold,border:`1px solid ${T.gold}55`}}>
+          🏌️ {rV.summary}</div>}
+      {(isTeam&&rV&&f!=="matchplay2v2")&&<div style={{marginTop:4,fontSize:13,fontWeight:700,
         textAlign:"center",color:T.gold}}>{rV.summary}</div>}
-      {rV&&anyScore&&!isTeam&&<div style={{marginTop:8,fontSize:12,color:T.dim,
+      {rV&&anyScore&&!isTeam&&f!=="matchplay"&&<div style={{marginTop:8,fontSize:12,color:T.dim,
         borderTop:`1px solid ${T.line}`,paddingTop:8}}>
         ⚡ {rV.summary}</div>}
     </div>
@@ -2581,11 +2585,25 @@ function computeSub(sg,ps,course,net){
     const b=f==="matchplay"?[ps[1]]:ps.slice(2,4);
     const th_=(team,h)=>{const v=team.map(p=>nets[p.id][h]).filter(x=>x!=null);
       return v.length?Math.min(...v):null;};
-    let win=0;for(let h=0;h<18;h++){const e=th_(a,h),u=th_(b,h);
-      if(e==null||u==null)continue;if(e<u)win++;else if(u<e)win--;}
+    let win=0,played=0;                 // win>0 = A mène ; played = trous joués
+    for(let h=0;h<18;h++){const e=th_(a,h),u=th_(b,h);
+      if(e==null||u==null)continue; played++; if(e<u)win++;else if(u<e)win--;}
     const A=a.map(p=>dispName(p)).join("/"),B=b.map(p=>dispName(p)).join("/");
-    return {summary:win===0?"Match nul (½)":`${win>0?A:B} gagne ${Math.abs(win)} trou(s)`,
-      winner:win>0?A:win<0?B:null};
+    const lead=Math.abs(win), leader=win>0?A:B, remaining=18-played;
+    let summary,winner=null;
+    if(win!==0 && lead>remaining){       // match plié (avance > trous restants)
+      winner=leader;
+      summary = remaining>0 ? `${leader} gagne ${lead}&${remaining}`
+                            : `${leader} gagne ${lead} UP`;
+    } else if(played>=18){               // arrivé au 18e
+      if(win===0) summary="Match nul — All Square (½)";
+      else { winner=leader; summary=`${leader} gagne ${lead} UP`; }
+    } else if(win===0){                  // en cours, à égalité
+      summary = played===0 ? "All Square (départ)" : "All Square (à égalité)";
+    } else {                             // en cours, un joueur mène
+      summary = `${leader} ${lead} UP`+(lead===remaining?" · dormie 🔥":"");
+    }
+    return {summary,winner,mpWin:win,mpPlayed:played};
   }
   if(f==="mexicaine"){
     // 2v2 BRUT. Par trou : nombre à 2 chiffres (meilleur en 1er). Croix = par+4.
