@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, loadMyProfile, saveMyProfile, su
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.20 · faq rubriques"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.21 · parcours vide"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -878,7 +878,7 @@ function NewGame({setTab}){
   const [type,setType]=useState(DB.lget("newType","simple"));
   const [subtype,setSubtype]=useState("simple"); // tournoi : 'simple' | 'ryder'
   const [name,setName]=useState("");
-  const [courseId,setCourseId]=useState(courses[0]?.id);
+  const [courseId,setCourseId]=useState(undefined); // champ parcours VIDE au départ (à choisir)
   const [mode,setMode]=useState("net");
   const [hcpRelative,setHcpRelative]=useState(false); // coups rendus différentiel (match play)
   const [selected,setSelected]=useState([]);
@@ -925,6 +925,7 @@ function NewGame({setTab}){
     return base.includes(todayTag())?base:`${base} ${todayTag()} ${timeTag()}`;};
 
   const create=()=>{
+    if(type==="simple" && !courseId) return alert("Choisis d'abord un parcours.");
     if(n<2)return alert("Au moins 2 joueurs.");
     // On n'archive un invité comme joueur permanent QUE s'il a saisi un VRAI prénom
     // (différent de "Invité") ET un index. Un invité jamais nommé est oublié, pas archivé.
@@ -1188,7 +1189,7 @@ function CourseAutocomplete({courses,setCourses,courseId,setCourseId}){
       <Field label="Parcours (tape pour rechercher)">
         <input value={q} onFocusCapture={()=>setOpen(true)}
           onChange={e=>{setQ(e.target.value);setOpen(true);}}
-          placeholder="ex: Golf de Pals…" style={inp}/></Field>
+          placeholder="Tape le nom du parcours…" style={inp}/></Field>
       {status && <div style={{fontSize:11,color:T.gold,marginTop:4}}>{status}</div>}
       {open && sugg.length>0 && (
         <div style={{background:T.panel2,border:`1px solid ${T.line}`,borderRadius:10,
