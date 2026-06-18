@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, loadMyProfile, saveMyProfile, su
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.13 · grille"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.14 · grille2"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -816,14 +816,14 @@ function CrestLogo({size=92}){
 }
 // tuile de raccourci (grille 2 colonnes)
 function Tile({color,icon,title,sub,onClick}){
-  return (<div onClick={onClick} style={{borderRadius:18,padding:"16px 14px",height:108,
+  return (<div onClick={onClick} style={{borderRadius:18,padding:"14px",height:112,
     boxSizing:"border-box",cursor:"pointer",border:`1.5px solid ${color}55`,
     background:`linear-gradient(160deg, ${color}1c 0%, ${T.panel} 70%)`,
-    display:"flex",flexDirection:"column",justifyContent:"space-between"}}>
-    <span style={{fontSize:26,lineHeight:1}}>{icon}</span>
+    display:"flex",flexDirection:"column",justifyContent:"flex-start",gap:8}}>
+    <span style={{fontSize:26,lineHeight:1,height:30}}>{icon}</span>
     <div style={{minWidth:0}}>
       <div style={{fontWeight:800,fontSize:15,lineHeight:1.15}}>{title}</div>
-      <div style={{fontSize:11,color:T.dim,lineHeight:1.3,marginTop:2,
+      <div style={{fontSize:11,color:T.dim,lineHeight:1.3,marginTop:3,
         overflow:"hidden",textOverflow:"ellipsis"}}>{sub}</div></div></div>);
 }
 function BigCard({color,icon,title,sub,onClick}){
