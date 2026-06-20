@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, loadMyProfile, saveMyProfile, su
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.25 · droits"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.26 · sync-live"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -232,6 +232,7 @@ export default function App(){
   // Plus d'authentification : accès libre. Données partagées via Supabase (clé publique).
   const [members,setMembers]=useState(()=>DB.lget("members",SEED_MEMBERS));
   const [games,setGames]=useState(()=>DB.lget("games",[]));
+  const gamesRef=useRef(games); // dernier état connu (pour ne pousser QUE la partie modifiée)
   const [courses,setCourses]=useState(()=>DB.lget("courses",SEED_COURSES));
   const [tab,setTab]=useState("home");
   const [openGameId,setOpenGameId]=useState(null); // partie à ouvrir (ex: rejoindre)
@@ -300,10 +301,25 @@ export default function App(){
   useEffect(()=>{ if(!cloud) DB.lset("members",members); },[members,cloud]);
   useEffect(()=>{ if(!cloud) DB.lset("games",games); },[games,cloud]);
   useEffect(()=>{ if(!cloud) DB.lset("courses",courses); },[courses,cloud]);
+  // gamesRef suit toujours l'état courant (y compris après un resync temps réel)
+  useEffect(()=>{ gamesRef.current=games; },[games]);
 
   // wrappers qui sauvegardent dans le cloud (clé publique, pas d'userId)
-  const saveGames=async(next)=>{ setGames(next);
-    if(cloud){ for(const g of next){ await upsertEntity("games",g,null); } } };
+  // On ne pousse QUE la/les partie(s) réellement modifiée(s), et on récupère le _row
+  // (id de ligne cloud) dès la 1re écriture → la MÊME ligne est mise à jour ensuite
+  // (sinon : doublons + synchro live qui ne se propage qu'à la validation finale).
+  const saveGames=async(next)=>{
+    const prev=gamesRef.current; gamesRef.current=next;
+    setGames(next);
+    if(!cloud) return;
+    const strip=x=>JSON.stringify({...x,_row:undefined});
+    for(const g of next){
+      const before=prev.find(x=>String(x.id)===String(g.id));
+      if(before && strip(before)===strip(g)) continue; // inchangée → on ne renvoie rien
+      const rid=await upsertEntity("games",g,null);
+      if(rid && !g._row) g._row=rid; // mémorise la ligne cloud pour les MAJ suivantes
+    }
+  };
   // suppression DÉFINITIVE d'une partie : il FAUT supprimer la ligne cloud,
   // sinon la partie revient au resync (cause du bug "je n'arrive pas à supprimer").
   const removeGame=async(game)=>{
