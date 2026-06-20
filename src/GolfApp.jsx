@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, loadMyProfile, saveMyProfile, su
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.26 · sync-live"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.27 · classement-membres"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -670,7 +670,7 @@ function FaqTab(){
       ["👥👥 À 4 joueurs (2 contre 2)","On compare le MEILLEUR net de chaque équipe, trou par trou. • Fourball, Foursome/Greensome, Scramble : match play d'équipe. • Match Play 2v2 : UP / All Square / 2&1. • Mexicaine (brut) : nombre à 2 chiffres/trou + bonus (par+par, 2 birdies) et inversion ; le plus petit gagne, l'écart s'accumule."],
     ]],
     ["🏅 Le championnat",[
-      ["🏅 Les points de saison (duels)","On compte les DUELS (qui bat qui) : 1v1 → Victoire 3 · Nul 1 · Défaite 0. À 3 → 2 duels (V 2) : battre les 2 = 4. Double 2v2 → V 3 chacun. Indépendant de la formule de jeu."],
+      ["🏅 Les points de saison (duels)","On compte les DUELS (qui bat qui) : 1v1 → Victoire 3 · Nul 1 · Défaite 0. À 3 → 2 duels (V 2) : battre les 2 = 4. Double 2v2 → V 3 chacun. Indépendant de la formule de jeu. ⚖️ IMPORTANT : une confrontation ne compte au classement que s'il y a AU MOINS 2 membres G&A dedans — tout le monde peut jouer (invités compris), mais le classement officiel reste entre membres."],
       ["🏆 Les tournois","Chaque manche compte, ET le vainqueur du tournoi gagne +5 (trophée). En équipe (Ryder), on est SOLIDAIRES : on gagne et on perd ensemble, pas de carte individuelle."],
       ["📊 Deux classements","« Cumulé » (qui joue plus marque plus) et « Moyenne par partie » (pour que ceux qui jouent peu aient leur chance). + le bilan des confrontations directes entre potes."],
     ]],
@@ -1300,6 +1300,10 @@ function CourseAutocomplete({courses,setCourses,courseId,setCourseId}){
 function computeStandings(done, courses){
   const S={}, H={};
   const ensure=id=>{if(!S[id])S[id]={pts:0,played:0,win:0,draw:0,loss:0};return S[id];};
+  // RÈGLE CLASSEMENT : tout le monde peut jouer, mais une confrontation ne compte au
+  // classement que si AU MOINS 2 membres G&A y participent (sinon : ignorée).
+  const isMember=p=>p?.member===true || /^seed-/.test(String(p?.id));
+  const counts=ps=>ps.filter(isMember).length>=2;
   done.forEach(g=>{
     const net=g.mode==="net";
     const subs=g.rounds
@@ -1312,6 +1316,7 @@ function computeStandings(done, courses){
       const teamWins=[0,0];
       subs.forEach(({sg,course})=>{
         const ps=sg.players.map(id=>g.roster.find(p=>p.id===id)).filter(Boolean);
+        if(!counts(ps)) return; // pas assez de membres → ne compte pas au classement
         const {pts}=playerScores(sg,ps,course,net);
         const ts=[0,0];
         ps.forEach(p=>{ if(p.team===0||p.team===1) ts[p.team]+=(pts[p.id]||0); });
@@ -1331,6 +1336,7 @@ function computeStandings(done, courses){
     const gamePts={};
     subs.forEach(({sg,course})=>{
       const ps=sg.players.map(id=>g.roster.find(p=>p.id===id)).filter(Boolean);
+      if(!counts(ps)) return; // pas assez de membres → ne compte pas au classement
       const {pts,h2h,res}=playerScores(sg,ps,course,net);
       Object.entries(pts).forEach(([id,pt])=>{
         const s=ensure(id);s.pts+=pt;s.played++;gamePts[id]=(gamePts[id]||0)+pt;
@@ -1368,7 +1374,12 @@ function seasonImpact(g, games, courses){
     return {id, gained:Math.round(((a.pts||0)-(b.pts||0))*10)/10, total:a.pts||0,
       rank:ar, delta:(ar&&br)?(br-ar):null, isNew:!!(ar&&!br)}; // delta>0 = a gagné des places
   }).sort((x,y)=>(x.rank||99)-(y.rank||99)); // ordre du classement général
-  return {lines};
+  // la partie compte-t-elle au classement ? (≥2 membres dans au moins une confrontation)
+  const isMember=p=>p?.member===true||/^seed-/.test(String(p?.id));
+  const subs=g.rounds?g.rounds.flatMap(r=>r.subgames||[]):(g.subgames||[]);
+  const counted=subs.some(sg=>(sg.players||[]).map(id=>(g.roster||[]).find(p=>p.id===id))
+    .filter(Boolean).filter(isMember).length>=2);
+  return {lines,counted};
 }
 
 function Championship(){
@@ -1393,7 +1404,9 @@ function Championship(){
         {" "}<b style={{color:T.text}}>Double 2v2</b> → V 3 · N 1 · D 0 par équipier.
         {" "}<b style={{color:T.text}}>Tournoi</b> : chaque manche compte +
         {" "}<b style={{color:T.gold}}>🏆 +5 au vainqueur</b>. Deux classements :
-        {" "}<b style={{color:T.text}}>cumulé</b> et <b style={{color:T.text}}>moyenne/partie</b>.</div>
+        {" "}<b style={{color:T.text}}>cumulé</b> et <b style={{color:T.text}}>moyenne/partie</b>.
+        {" "}⚖️ Seules les confrontations avec <b style={{color:T.text}}>≥ 2 membres G&A</b> comptent
+        {" "}(les autres se jouent mais hors classement).</div>
 
       <div style={{display:"flex",gap:10,marginTop:4}}>
         <RankCol title="🔢 CUMULÉ" rows={byTotal} metric={r=>r.pts} unit="pts"/>
@@ -2007,7 +2020,9 @@ function ShareResults({g,courses,playerById}){
       t+=`${D}\n${n0}  ${t0} – ${t1}  ${n1}\n${lead}\n`;
     }
     // 🏅 Impact sur le classement de saison (points gagnés + nouveau total/rang)
-    if(impact.lines.length){
+    if(!impact.counted){
+      t+=`${D}\n⚖️ Partie hors classement (moins de 2 membres G&A)\n`;
+    } else if(impact.lines.length){
       t+=`${D}\n🏅 Classement de saison\n`;
       impact.lines.forEach(l=>{const p=playerById(l.id);
         const prog=l.isNew?" (NEW)":l.delta>0?` ▲${l.delta}`:l.delta<0?` ▼${-l.delta}`:" =";
@@ -2030,7 +2045,13 @@ function ShareResults({g,courses,playerById}){
   };
   return (
     <div style={{marginTop:14}}>
-      {impact.lines.length>0 && (
+      {!impact.counted && (
+        <div style={{...card(T.line),marginBottom:12,fontSize:12,color:T.dim,lineHeight:1.5}}>
+          ⚖️ <b style={{color:T.text}}>Partie hors classement</b> — il faut au moins
+          {" "}<b style={{color:T.text}}>2 membres G&A</b> dans une même confrontation pour
+          marquer des points de saison. (Vous avez quand même tous vos résultats du jour 👍)</div>
+      )}
+      {impact.counted && impact.lines.length>0 && (
         <div style={{...card(T.gold),marginBottom:12}}>
           <div style={{fontWeight:800,marginBottom:8}}>🏅 Évolution au classement de saison</div>
           {impact.lines.map((l,i)=>{const p=playerById(l.id);
