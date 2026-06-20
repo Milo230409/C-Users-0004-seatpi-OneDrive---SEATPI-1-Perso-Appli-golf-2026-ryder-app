@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, loadMyProfile, saveMyProfile, su
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.27 · classement-membres"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.28 · faq maj"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -654,29 +654,34 @@ function FaqTab(){
   const groups=[
     ["🚀 Démarrer",[
       ["👋 Première connexion","Sur l'accueil « Qui es-tu ? », tape sur ton prénom. À ta 1re fois, tu remplis ta fiche UNE seule fois (surnom, index / niveau de jeu, mobile, email). C'est tout."],
-      ["🔑 Te reconnecter","Les fois suivantes, tu tapes ton prénom et tu confirmes que c'est bien toi. On en profite pour vérifier ton index / niveau de jeu (tu l'ajustes si tu as progressé). ⚠️ L'index ne sert PAS de mot de passe : son seul rôle est de calculer les coups rendus, donc garde-le fidèle à ton vrai niveau."],
-      ["👤 Mon compte","Bouton 👤 en haut : change ton surnom, ton index / niveau, ton mobile, ton email ou ta préférence de notif quand tu veux."],
+      ["🔑 Te reconnecter","Les fois suivantes : tape ton prénom → saisis ton index / niveau de ta DERNIÈRE connexion (petite sécurité : sans le connaître, on n'entre pas sur le compte d'un autre) → puis ajuste ton niveau du jour. ⚠️ L'index n'est PAS un mot de passe : son seul rôle est de calculer les coups rendus, garde-le fidèle à ton vrai niveau."],
+      ["🔔 Rejoindre une partie en cours","Si tu te connectes alors qu'une partie où tu es inscrit n'est pas terminée, l'accueil te propose de la REJOINDRE en un clic (ou « Plus tard »)."],
+      ["⏲️ Déconnexion auto","Après un long moment sans activité, l'appli te déconnecte (retour à « Qui es-tu ? ») — mais JAMAIS pendant une partie en cours : tu peux scorer tout ton round tranquille."],
+      ["👤 Mon compte","Bouton 👤 en haut : change ton surnom, ton index / niveau, ton mobile, ton email ou ta notif. Tu ne modifies que TA fiche (les autres, c'est l'organisateur)."],
     ]],
     ["⛳ Jouer une partie",[
-      ["➕ Lancer une partie","Onglet Nouvelle : choisis le parcours, les joueurs (et invités), la formule, Net ou Brut. Pour du match play, coche « Coups rendus en différentiel »."],
-      ["✍️ Le scoreur","Dans chaque partie, on désigne qui « tient la carte » (le scoreur). À plusieurs parties simultanées, chaque partie a SON scoreur. Lui seul saisit les scores."],
-      ["👀 Suivre en direct","Les autres joueurs ouvrent la même partie et suivent l'avancée en direct, en lecture seule. À la saisie, on ne voit que SA partie (bouton pour voir les autres)."],
-      ["🗺️ Les parcours (tout est modifiable !)","15 parcours sont préchargés. Tu peux en créer d'autres : recherche dans la base mondiale GolfCourseAPI (tous n'y sont pas), ou ajout à la main. Et TOUT est éditable : si un index de trou (HCP), un par ou un slope est inexact, corrige-le UNE fois → c'est mémorisé pour toujours. Rien d'irréversible, mais SOYEZ RIGOUREUX : on ne flingue pas les parcours du groupe 🙏"],
+      ["➕ Lancer une partie","Onglet Nouvelle, dans l'ordre : 1) le Parcours (tape pour le chercher) · 2) les joueurs · 3) la Formule · 4) le Décompte (Brut ou Net, + case « différentiel » pour le match play). Tout le monde peut jouer (membres + invités)."],
+      ["👥 Membres & invités","Les membres G&A restent en pastilles. Les anciens invités sont rangés dans une liste déroulante « + Ajouter un ancien invité » pour ne pas encombrer. Tu peux aussi créer un invité à la volée."],
+      ["🤝 Les équipes (2 contre 2)","Pour une formule 2v2 (Fourball, Mexicaine, Scramble, Foursome, Match Play 2v2), une section « Les équipes » te fait désigner qui joue avec qui : Équipe 1 / Équipe 2 (2 joueurs chacune)."],
+      ["✍️ Le scoreur","Dans chaque partie on désigne qui « tient la carte » (le scoreur). À plusieurs parties en parallèle, chacune a SON scoreur ; lui seul saisit les scores."],
+      ["👀 Suivre en direct","Les autres ouvrent la même partie et suivent le score en lecture seule. Le tableau se met à jour À CHAQUE TROU VALIDÉ → tout le monde voit l'avancement en temps réel, sans attendre la fin."],
+      ["🗺️ Les parcours","15 parcours préchargés. Chacun peut en CRÉER (recherche GolfCourseAPI ou saisie à la main) et CORRIGER un par / HCP / slope inexact (mémorisé pour toujours) — soyez rigoureux 🙏. Seul l'organisateur peut SUPPRIMER un parcours."],
     ]],
     ["🎮 Les formules de jeu",[
       ["🎯 2 niveaux de points","Deux choses distinctes : (1) le RÉSULTAT de la partie — qui gagne, dans le langage de la formule ; (2) les POINTS DE SAISON — un système de DUELS identique pour TOUTES les formules, qui alimente le classement. Une partie non validée = 0 point. (Net = brut − coups rendus.)"],
-      ["👥 À 2 joueurs","• Match Play 1v1 : le net le plus bas gagne le trou → 1 UP / All Square / 2&1. • Stroke Play net : plus petit total de coups nets. • Stableford (net ou brut) : eagle 4 · birdie 3 · par 2 · bogey 1 · double+ 0. • Skins : 1 pt/trou au net le plus bas ; égalité → le point se REPORTE au trou suivant."],
+      ["👥 À 2 joueurs","• Match Play 1v1 : le net le plus bas gagne le trou → statut 1 UP / All Square / 2&1, mis à jour après chaque trou. • Stroke Play net : plus petit total de coups nets. • Stableford (net ou brut) : eagle 4 · birdie 3 · par 2 · bogey 1 · double+ 0. • Skins : 1 pt/trou au net le plus bas ; égalité → le point se REPORTE au trou suivant."],
       ["👥 À 3 joueurs","• Chouette (6 pts/trou) selon les 3 nets : 4/2/0 si tous différents · 3/3/0 (égalité 1er) · 4/1/1 (égalité 2e) · 2/2/2 (les 3 à égalité). • 1v1v1 : le net le plus bas du trou prend 1 pt (partagé si égalité). • Stableford et Skins : comme à 2."],
-      ["👥👥 À 4 joueurs (2 contre 2)","On compare le MEILLEUR net de chaque équipe, trou par trou. • Fourball, Foursome/Greensome, Scramble : match play d'équipe. • Match Play 2v2 : UP / All Square / 2&1. • Mexicaine (brut) : nombre à 2 chiffres/trou + bonus (par+par, 2 birdies) et inversion ; le plus petit gagne, l'écart s'accumule."],
+      ["👥👥 À 4 joueurs (2 contre 2)","On compare le MEILLEUR net de chaque équipe, trou par trou. • Fourball, Foursome/Greensome, Scramble : match play d'équipe. • Match Play 2v2 : UP / All Square / 2&1. • Mexicaine (brut) : nombre à 2 chiffres/trou + bonus (par+par +5, 2 birdies +10) et inversion par birdie adverse ; le plus petit gagne, l'écart s'accumule. Le tableau live explique chaque coup spécial (« Faits de jeu »)."],
     ]],
     ["🏅 Le championnat",[
-      ["🏅 Les points de saison (duels)","On compte les DUELS (qui bat qui) : 1v1 → Victoire 3 · Nul 1 · Défaite 0. À 3 → 2 duels (V 2) : battre les 2 = 4. Double 2v2 → V 3 chacun. Indépendant de la formule de jeu. ⚖️ IMPORTANT : une confrontation ne compte au classement que s'il y a AU MOINS 2 membres G&A dedans — tout le monde peut jouer (invités compris), mais le classement officiel reste entre membres."],
+      ["🏅 Les points de saison (duels)","On compte les DUELS (qui bat qui) : 1v1 → Victoire 3 · Nul 1 · Défaite 0. À 3 → 2 duels (V 2) : battre les 2 = 4. Double 2v2 → V 3 chacun. Indépendant de la formule de jeu."],
+      ["⚖️ Qui compte au classement ?","Tout le monde peut jouer (invités compris), mais une confrontation ne RAPPORTE des points de saison que s'il y a AU MOINS 2 membres G&A dedans. Sinon la partie se joue normalement mais reste « hors classement » (c'est indiqué en fin de partie)."],
       ["🏆 Les tournois","Chaque manche compte, ET le vainqueur du tournoi gagne +5 (trophée). En équipe (Ryder), on est SOLIDAIRES : on gagne et on perd ensemble, pas de carte individuelle."],
       ["📊 Deux classements","« Cumulé » (qui joue plus marque plus) et « Moyenne par partie » (pour que ceux qui jouent peu aient leur chance). + le bilan des confrontations directes entre potes."],
     ]],
     ["📲 Communication & réglages",[
-      ["💬 Partage WhatsApp","À la fin d'une partie (validation du 18e trou), tu vois le vainqueur, les points et l'évolution au classement — et tu partages tout au groupe en un clic."],
-      ["🔒 Réglages","Le menu ⚙️ (clé API parcours, lien du groupe WhatsApp) est réservé à l'organisateur, pour que personne n'efface un réglage par erreur."],
+      ["💬 Partage WhatsApp","À la validation du 18e trou : le résultat de la formule + une fiche par joueur (médaille + Stableford BRUT et NET) + l'évolution au classement (points gagnés, rang, ▲/▼ places). Tu partages tout au groupe en un clic. Si la partie ne compte pas (moins de 2 membres), c'est précisé."],
+      ["🔒 Droits & réglages","Le menu ⚙️ (clé parcours, lien du groupe WhatsApp) est réservé à l'organisateur. Lui seul peut aussi modifier la fiche d'un autre joueur et supprimer un parcours. Les autres : ils créent / corrigent les parcours et gèrent LEUR propre fiche."],
     ]],
   ];
   const [open,setOpen]=useState(0); // accordéon : index de rubrique ouverte (-1 = toutes fermées)
