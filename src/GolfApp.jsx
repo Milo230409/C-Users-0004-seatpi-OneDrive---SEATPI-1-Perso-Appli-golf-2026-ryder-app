@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, loadMyProfile, saveMyProfile, su
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.31 · nom-auto"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.32 · vignettes"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -195,7 +195,7 @@ function formulasFor(n){
 const BRUT_ONLY=["mexicaine"];
 // Formules d'équipe 2 contre 2 : on demande qui joue avec qui.
 const TEAM_2V2=["fourball","bestworst","foursome","scramble","chamble","mexicaine","matchplay2v2"];
-const FORMULA_LABELS={matchplay:"Match Play 1v1",strokeplay_net:"Stroke Play (net) 1v1",
+const FORMULA_LABELS={matchplay:"Match Play 1v1",strokeplay_net:"Stroke Play 1v1",
   stableford:"Stableford",stableford_net:"Stableford Net",stableford_gross:"Stableford Brut",
   skins:"Skins (18 pts · report)",chouette:"Chouette (6 pts · 4/2/0)",
   onevonevone:"1v1v1 (match play à 3)",fourball:"Fourball (meilleure balle)",
@@ -974,12 +974,13 @@ function NewGame({setTab}){
   useEffect(()=>{if(type==="event"&&n>=2)
     setRounds(rs=>rs.map(r=>({...r,split:autoSplit(n)})));},[n,type]);// eslint-disable-line
 
-  // Nom AUTO-DÉDUIT du mode de jeu + date + heure (plus de saisie libre).
+  // Nom AUTO-DÉDUIT : mode de jeu + brut/net + date + heure (plus de saisie libre).
   const finalName=()=>{
     const d=new Date(),z=n=>String(n).padStart(2,"0");
     const when=`${z(d.getDate())}/${z(d.getMonth()+1)}/${String(d.getFullYear()).slice(2)} · ${z(d.getHours())}h${z(d.getMinutes())}`;
     const what=type==="event"?(subtype==="ryder"?"Ryder Cup":"Tournoi"):(FORMULA_SHORT[formula]||"Partie");
-    return `${what} · ${when}`;
+    const nb=brutOnly?"brut":(mode==="gross"?"brut":"net"); // l'info brut/net reste dans le titre
+    return `${what} ${nb} · ${when}`;
   };
 
   const create=()=>{
@@ -1832,8 +1833,11 @@ function History({openId,onConsumeOpen}){
         display:"flex",alignItems:"center",gap:8}}>
       <div style={{flex:1}}>
         <div style={{fontWeight:800}}>{g.name}</div>
-        <div style={{fontSize:11,color:T.dim}}>{g.type==="event"?(g.subtype==="ryder"?"🏆 Ryder Cup":"🏆 Tournoi"):"⛳ Partie amicale"} ·
-          {g.roster?.length} joueurs · {g.done?"terminé":"en cours"} · tap pour ouvrir</div>
+        <div style={{fontSize:11,color:T.dim,whiteSpace:"nowrap",overflow:"hidden",
+          textOverflow:"ellipsis"}}>
+          {g.type==="event"?(g.subtype==="ryder"?"🏆 Ryder Cup":"🏆 Tournoi"):"⛳ Partie amicale"}
+          {" · "}{(g.roster||[]).map(p=>dispName(p)).join(", ")}
+          {" · "}{g.done?"terminé":"en cours"} · tap pour ouvrir</div>
       </div>
       <button onClick={e=>delGame(g.id,e)} style={{...delBtn,flexShrink:0}}>🗑</button>
     </div>))}</div>);
