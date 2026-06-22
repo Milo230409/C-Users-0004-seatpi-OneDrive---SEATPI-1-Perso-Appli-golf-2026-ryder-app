@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, loadMyProfile, saveMyProfile, su
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.30 · chamble"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.31 · nom-auto"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -202,6 +202,11 @@ const FORMULA_LABELS={matchplay:"Match Play 1v1",strokeplay_net:"Stroke Play (ne
   bestworst:"Fourball — meilleure & moins bonne",
   foursome:"Foursome / Greensome",mexicaine:"Mexicaine 2v2",
   scramble:"Scramble",chamble:"Chamble (drive en équipe)",matchplay2v2:"Match Play 2v2"};
+// Libellés courts pour le NOM auto des parties (mode de jeu).
+const FORMULA_SHORT={matchplay:"Match Play",strokeplay_net:"Stroke Play",stableford:"Stableford",
+  skins:"Skins",chouette:"Chouette",onevonevone:"1v1v1",fourball:"Fourball",
+  bestworst:"Fourball M&MB",foursome:"Foursome",mexicaine:"Mexicaine",scramble:"Scramble",
+  chamble:"Chamble",matchplay2v2:"Match Play 2v2"};
 
 function autoSplit(n){
   const map={2:[[2,"matchplay"]],3:[[3,"chouette"]],4:[[4,"fourball"]],
@@ -969,9 +974,13 @@ function NewGame({setTab}){
   useEffect(()=>{if(type==="event"&&n>=2)
     setRounds(rs=>rs.map(r=>({...r,split:autoSplit(n)})));},[n,type]);// eslint-disable-line
 
-  const finalName=()=>{const base=name.trim()||(type==="event"?"Event":"Partie");
-    // on dédoublonne sur la date ; l'heure est ajoutée pour distinguer plusieurs parties/jour
-    return base.includes(todayTag())?base:`${base} ${todayTag()} ${timeTag()}`;};
+  // Nom AUTO-DÉDUIT du mode de jeu + date + heure (plus de saisie libre).
+  const finalName=()=>{
+    const d=new Date(),z=n=>String(n).padStart(2,"0");
+    const when=`${z(d.getDate())}/${z(d.getMonth()+1)}/${String(d.getFullYear()).slice(2)} · ${z(d.getHours())}h${z(d.getMinutes())}`;
+    const what=type==="event"?(subtype==="ryder"?"Ryder Cup":"Tournoi"):(FORMULA_SHORT[formula]||"Partie");
+    return `${what} · ${when}`;
+  };
 
   const create=()=>{
     if(type==="simple" && !courseId) return alert("Choisis d'abord un parcours.");
@@ -1060,10 +1069,10 @@ function NewGame({setTab}){
         Ryder Cup : deux équipes, tirage au sort en 3 chapeaux (équilibré par index)
         à lancer dans le détail du tournoi, et cumul des points sur toutes les manches.</div>}
 
-      <Field label="Nom (la date sera ajoutée)">
-        <input value={name} onChange={e=>setName(e.target.value)}
-          placeholder={`ex: Skins du samedi → ...${todayTag()}`} style={inp}/></Field>
-      <div style={{fontSize:11,color:T.accent,marginTop:4}}>Nom final : {finalName()}</div>
+      <div style={{...card(T.line),fontSize:12,color:T.dim,display:"flex",
+        alignItems:"center",gap:8}}>
+        <span style={{fontSize:18}}>🏷️</span>
+        <span>Nom de la partie (auto) : <b style={{color:T.text}}>{finalName()}</b></span></div>
 
       {type==="simple"?(<>
         <Section>Parcours</Section>
