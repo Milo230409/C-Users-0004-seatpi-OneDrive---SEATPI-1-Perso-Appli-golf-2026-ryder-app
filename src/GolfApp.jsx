@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, loadMyProfile, saveMyProfile, su
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.36 · vignette fix"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.39 · minicup-minichamp"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -273,6 +273,58 @@ function buildConfrontations(g){
     return {...r,subgames:subs};
   });
 }
+
+// ===== COUPE (bracket à élimination directe, 1v1) =====
+function shuffleArr(a){const r=[...a];for(let i=r.length-1;i>0;i--){
+  const j=Math.floor(Math.random()*(i+1));[r[i],r[j]]=[r[j],r[i]];}return r;}
+function coupeRoundName(nMatches){return nMatches===1?"Finale":nMatches===2?"Demi-finales"
+  :nMatches===4?"Quarts de finale":nMatches===8?"8es de finale":`Tour (${nMatches} matchs)`;}
+// Tirage FULL aléatoire du tour 1 (byes si nombre impair). Toutes les confrontations en 1v1.
+function drawCoupe(roster,formula,courseId,hcpRel){
+  const ids=shuffleArr((roster||[]).map(p=>p.id));const subgames=[];let id=1;
+  for(let i=0;i<ids.length;i+=2){const players=i+1<ids.length?[ids[i],ids[i+1]]:[ids[i]];
+    subgames.push({id:id++,formula,players,scores:{},validated:[],done:players.length<2,hcpRelative:hcpRel});}
+  return [{id:1,name:coupeRoundName(subgames.length),courseId,subgames}];
+}
+// Vainqueur d'un duel 1v1 (id). Bye = le seul joueur. Sinon points du duel, départage net.
+function matchWinnerId(sg,roster,course,net){
+  const pl=sg.players||[];
+  if(pl.length===1) return pl[0];
+  const ps=pl.map(id=>roster.find(p=>String(p.id)===String(id))).filter(Boolean);
+  if(ps.length<2||!course) return ps[0]?.id;
+  const {pts}=playerScores(sg,ps,course,net);
+  const sorted=[...ps].sort((a,b)=>(pts[b.id]||0)-(pts[a.id]||0));
+  if((pts[sorted[0].id]||0)>(pts[sorted[1].id]||0)) return sorted[0].id;
+  // égalité (ex All Square) → plus petit total net, puis meilleur index
+  const netTot=p=>{const chp=effChp(p,ps,course,sg.hcpRelative);const st=strokesPerHole(chp,course.si);
+    return (sg.validated||[]).reduce((s,h)=>{const g=sg.scores?.[p.id]?.[h];
+      return g==null?s:s+(net?g-st[h]:g);},0);};
+  return [...ps].sort((a,b)=>netTot(a)-netTot(b)||(a.index||0)-(b.index||0))[0].id;
+}
+// Tour suivant (si tour courant terminé) : on apparie les vainqueurs. null si pas prêt / fini.
+function nextCoupeRound(g,courses){
+  const net=g.mode==="net";const roster=g.roster||[];const rounds=g.rounds||[];
+  if(!rounds.length) return null;
+  const last=rounds[rounds.length-1];
+  const course=courses.find(c=>c.id===last.courseId)||courses.find(c=>c.id===g.courseId);
+  if(!last.subgames.every(sg=>sg.done||(sg.players||[]).length===1)) return null;
+  const winners=last.subgames.map(sg=>matchWinnerId(sg,roster,course,net)).filter(Boolean);
+  if(winners.length<=1) return null; // champion déjà connu
+  const subgames=[];let id=1;
+  for(let i=0;i<winners.length;i+=2){const players=i+1<winners.length?[winners[i],winners[i+1]]:[winners[i]];
+    subgames.push({id:id++,formula:g.coupeFormula||"matchplay",players,scores:{},validated:[],
+      done:players.length<2,hcpRelative:g.hcpRelative});}
+  return [...rounds,{id:rounds.length+1,name:coupeRoundName(subgames.length),courseId:last.courseId,subgames}];
+}
+// Champion de la coupe (id) si la finale est jouée.
+function coupeChampion(g,courses){
+  const net=g.mode==="net";const rounds=g.rounds||[];if(!rounds.length) return null;
+  const last=rounds[rounds.length-1];
+  if(last.subgames.length===1 && last.subgames[0].done)
+    return matchWinnerId(last.subgames[0],g.roster||[],courses.find(c=>c.id===last.courseId),net);
+  return null;
+}
+
 
 const Ctx=createContext();
 // Stockage persistant : écrit dans localStorage (survit aux rechargements et aux
@@ -727,11 +779,11 @@ function FaqTab(){
       ["👋 Première connexion","Sur l'accueil « Qui es-tu ? », tape sur ton prénom. À ta 1re fois, tu remplis ta fiche UNE seule fois (surnom, index / niveau de jeu, mobile, email). C'est tout."],
       ["🔑 Te reconnecter","Les fois suivantes : tape ton prénom → saisis ton index / niveau de ta DERNIÈRE connexion (petite sécurité : sans le connaître, on n'entre pas sur le compte d'un autre) → puis ajuste ton niveau du jour. ⚠️ L'index n'est PAS un mot de passe : son seul rôle est de calculer les coups rendus, garde-le fidèle à ton vrai niveau."],
       ["🔔 Rejoindre une partie en cours","Si tu te connectes alors qu'une partie où tu es inscrit n'est pas terminée, l'accueil te propose de la REJOINDRE en un clic (ou « Plus tard »)."],
-      ["⏲️ Déconnexion auto","Après un long moment sans activité, l'appli te déconnecte (retour à « Qui es-tu ? ») — mais JAMAIS pendant une partie en cours : tu peux scorer tout ton round tranquille."],
+      ["⏲️ Déconnexion auto","L'appli te déconnecte (retour à « Qui es-tu ? ») quand tu QUITTES l'appli, ou après un long moment d'inactivité — mais JAMAIS pendant une partie en cours : tu peux scorer tout ton round tranquille."],
       ["👤 Mon compte","Bouton 👤 en haut : change ton surnom, ton index / niveau, ton mobile, ton email ou ta notif. Tu ne modifies que TA fiche (les autres, c'est l'organisateur)."],
     ]],
     ["⛳ Jouer une partie",[
-      ["➕ Lancer une partie","Onglet Nouvelle, dans l'ordre : 1) le Parcours (tape pour le chercher) · 2) les joueurs · 3) la Formule · 4) le Décompte (Brut ou Net, + case « différentiel » pour le match play). Tout le monde peut jouer (membres + invités)."],
+      ["➕ Lancer une partie","Onglet Nouvelle : Partie amicale (2-4 joueurs) ou Tournoi. Tu choisis le Parcours, les joueurs, la Formule et le Décompte (Brut ou Net, + case « différentiel » pour le match play). Le NOM est automatique (formule + brut/net + date + heure). Tout le monde peut jouer (membres + invités)."],
       ["👥 Membres & invités","Les membres G&A restent en pastilles. Les anciens invités sont rangés dans une liste déroulante « + Ajouter un ancien invité » pour ne pas encombrer. Tu peux aussi créer un invité à la volée."],
       ["🤝 Les équipes (2 contre 2)","Pour une formule 2v2 (Fourball, Mexicaine, Scramble, Foursome, Match Play 2v2), une section « Les équipes » te fait désigner qui joue avec qui : Équipe 1 / Équipe 2 (2 joueurs chacune)."],
       ["✍️ Le scoreur","Dans chaque partie on désigne qui « tient la carte » (le scoreur). À plusieurs parties en parallèle, chacune a SON scoreur ; lui seul saisit les scores."],
@@ -747,7 +799,7 @@ function FaqTab(){
     ["🏅 Le championnat",[
       ["🏅 Les points de saison (duels)","On compte les DUELS (qui bat qui) : 1v1 → Victoire 3 · Nul 1 · Défaite 0. À 3 → 2 duels (V 2) : battre les 2 = 4. Double 2v2 → V 3 chacun. Indépendant de la formule de jeu."],
       ["⚖️ Qui compte au classement ?","Tout le monde peut jouer (invités compris), mais une confrontation ne RAPPORTE des points de saison que s'il y a AU MOINS 2 membres G&A dedans. Sinon la partie se joue normalement mais reste « hors classement » (c'est indiqué en fin de partie)."],
-      ["🏆 Les tournois","Chaque manche compte, ET le vainqueur du tournoi gagne +5 (trophée). En équipe (Ryder), on est SOLIDAIRES : on gagne et on perd ensemble, pas de carte individuelle."],
+      ["🏆 Les modes de tournoi","Onglet Nouvelle → Tournoi, 3 modes : • 🏆 RYDER CUP : 2 équipes, tirage en chapeaux de 2 (par index), confrontations équilibrées proposées et formules variées par manche, scoreboard façon EUR-USA. On est SOLIDAIRES (on gagne/perd ensemble). • 🥊 MINICUP : élimination directe en 1v1, tirage aléatoire, le gagnant avance jusqu'à la finale (format des duels choisi à la création). • 🏅 MINICHAMP : Intégral (cumul de points sur les manches, +5 au vainqueur) — les Poules arrivent bientôt."],
       ["📊 Deux classements","« Cumulé » (qui joue plus marque plus) et « Moyenne par partie » (pour que ceux qui jouent peu aient leur chance). + le bilan des confrontations directes entre potes."],
     ]],
     ["📲 Communication & réglages",[
@@ -880,7 +932,7 @@ function Home({setTab,staleCount,refreshStale,openGame}){
           background:`linear-gradient(160deg, ${T.gold}1a 0%, ${T.panel} 60%)`}}>
           <div style={{fontWeight:800}}>▶ {g.name}</div>
           <div style={{fontSize:11,color:T.dim}}>
-            {g.subtype==="ryder"?"Ryder Cup":g.type==="event"?"Tournoi":"Partie amicale"} ·
+            {g.subtype==="ryder"?"Ryder Cup":g.subtype==="coupe"?"MiniCup":g.type==="event"?"MiniChamp":"Partie amicale"} ·
             {g.rounds?` ${g.rounds.length} manche(s)`:` ${g.subgames?.length||1} match(s)`} · en cours</div></div>)}</>}
 
       <Section>Raccourcis</Section>
@@ -974,7 +1026,8 @@ function BigCard({color,icon,title,sub,onClick}){
 function NewGame({setTab}){
   const {members,setMembers,courses,setCourses,games,setGames}=useContext(Ctx);
   const [type,setType]=useState(DB.lget("newType","simple"));
-  const [subtype,setSubtype]=useState("simple"); // tournoi : 'simple' | 'ryder'
+  const [subtype,setSubtype]=useState("simple"); // tournoi : 'simple' | 'ryder' | 'coupe'
+  const [coupeFormula,setCoupeFormula]=useState("matchplay"); // format des duels d'une coupe
   const [name,setName]=useState("");
   const [courseId,setCourseId]=useState(undefined); // champ parcours VIDE au départ (à choisir)
   const [mode,setMode]=useState("net");
@@ -1033,13 +1086,14 @@ function NewGame({setTab}){
   const finalName=()=>{
     const d=new Date(),z=n=>String(n).padStart(2,"0");
     const when=`${z(d.getDate())}/${z(d.getMonth()+1)}/${String(d.getFullYear()).slice(2)} · ${z(d.getHours())}h${z(d.getMinutes())}`;
-    const what=type==="event"?(subtype==="ryder"?"Ryder Cup":"Tournoi"):(FORMULA_SHORT[formula]||"Partie");
+    const what=type==="event"?(subtype==="ryder"?"Ryder Cup":subtype==="coupe"?"MiniCup":"MiniChamp"):(FORMULA_SHORT[formula]||"Partie");
     const nb=brutOnly?"brut":(mode==="gross"?"brut":"net"); // l'info brut/net reste dans le titre
     return `${what} ${nb} · ${when}`;
   };
 
   const create=()=>{
     if(type==="simple" && !courseId) return alert("Choisis d'abord un parcours.");
+    if(subtype==="poule") return alert("Le mode Poules arrive très vite 🙏 — choisis « Intégral » pour l'instant.");
     if(n<2)return alert("Au moins 2 joueurs.");
     // On n'archive un invité comme joueur permanent QUE s'il a saisi un VRAI prénom
     // (différent de "Invité") ET un index. Un invité jamais nommé est oublié, pas archivé.
@@ -1068,6 +1122,13 @@ function NewGame({setTab}){
       const subgames=[{id:1,formula,players:ids,scores:{},validated:[],done:false,hcpRelative}];
       const game={id:Date.now(),name:finalName(),type,courseId,mode,roster,subgames,
         hcpRelative,teamNames:team2v2?["Équipe 1","Équipe 2"]:null,done:false,created:Date.now()};
+      setGames([game,...games]);setTab("history");return;
+    }
+    if(subtype==="coupe"){
+      if(!courseId) return alert("Choisis d'abord un parcours.");
+      // bracket vide : le tirage du tour 1 se lance dans le détail
+      const game={id:Date.now(),name:finalName(),type:"event",subtype:"coupe",mode,courseId,
+        coupeFormula,roster,rounds:[],hcpRelative,teamNames:null,done:false,created:Date.now()};
       setGames([game,...games]);setTab("history");return;
     }
     // TOURNOI : chaque manche a SON parcours + SA répartition (formules choisies à la main)
@@ -1116,21 +1177,43 @@ function NewGame({setTab}){
         <Pill active={type==="simple"} onClick={()=>setType("simple")}>Partie amicale</Pill>
         <Pill active={type==="event"} onClick={()=>setType("event")}>Tournoi</Pill>
       </div>
-      {type==="event"&&<div style={{display:"flex",gap:8,marginBottom:8}}>
-        <Pill active={subtype==="simple"} onClick={()=>setSubtype("simple")}>Tournoi simple</Pill>
+      {type==="event"&&<div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:8}}>
         <Pill active={subtype==="ryder"} onClick={()=>setSubtype("ryder")}>🏆 Ryder Cup</Pill>
+        <Pill active={subtype==="coupe"} onClick={()=>setSubtype("coupe")}>🥊 MiniCup</Pill>
+        <Pill active={subtype==="simple"||subtype==="poule"} onClick={()=>setSubtype("simple")}>🏅 MiniChamp</Pill>
       </div>}
+      {type==="event"&&(subtype==="simple"||subtype==="poule")&&
+        <div style={{display:"flex",gap:8,marginBottom:8}}>
+          <Pill active={subtype==="simple"} onClick={()=>setSubtype("simple")}>Intégral</Pill>
+          <Pill active={subtype==="poule"} onClick={()=>setSubtype("poule")}>Poules</Pill>
+        </div>}
+      {type==="event"&&subtype==="poule"&&<div style={{...card(T.gold),fontSize:12,
+        color:T.dim,marginBottom:4,lineHeight:1.5}}>
+        🧩 <b style={{color:T.text}}>Poules</b> : tirage en groupes, chacun joue les autres de sa
+        poule. <b style={{color:T.gold}}>🚧 En préparation</b> — pour l'instant choisis
+        <b style={{color:T.text}}> Intégral</b>, je livre les Poules juste après.</div>}
       {type==="event"&&subtype==="ryder"&&<div style={{...card(T.us),fontSize:12,
         color:T.dim,marginBottom:4}}>
-        Ryder Cup : deux équipes, tirage au sort en 3 chapeaux (équilibré par index)
+        Ryder Cup : deux équipes, tirage au sort en chapeaux (équilibré par index)
         à lancer dans le détail du tournoi, et cumul des points sur toutes les manches.</div>}
+      {type==="event"&&subtype==="coupe"&&<div style={{...card(T.gold),fontSize:12,
+        color:T.dim,marginBottom:4,lineHeight:1.5}}>
+        🏆 MiniCup : <b style={{color:T.text}}>élimination directe en 1v1</b>. Tirage full aléatoire,
+        le gagnant avance, on se rapproche de la finale (Quarts → Demies → Finale). Choisis le
+        format des duels (le même pour tous) :
+        <select value={coupeFormula} onChange={e=>setCoupeFormula(e.target.value)}
+          style={{...inp,marginTop:6}}>
+          <option value="matchplay">Match Play (trou par trou)</option>
+          <option value="strokeplay_net">Stroke Play (plus petit score)</option>
+          <option value="stableford">Stableford (plus de points)</option>
+        </select></div>}
 
       <div style={{...card(T.line),fontSize:12,color:T.dim,display:"flex",
         alignItems:"center",gap:8}}>
         <span style={{fontSize:18}}>🏷️</span>
         <span>Nom de la partie (auto) : <b style={{color:T.text}}>{finalName()}</b></span></div>
 
-      {type==="simple"?(<>
+      {(type==="simple"||subtype==="coupe")?(<>
         <Section>Parcours</Section>
         <CourseAutocomplete courses={courses} setCourses={setCourses}
           courseId={courseId} setCourseId={setCourseId}/>
@@ -1251,7 +1334,7 @@ function NewGame({setTab}){
           : decompteUI}
       </>):n>4?<Warn>Partie amicale = 2 à 4 joueurs. Passe en "Tournoi" pour {n}.</Warn>:null)}
 
-      {type==="event"&&n>=2&&(<>
+      {type==="event"&&subtype!=="coupe"&&n>=2&&(<>
         <Section>Formules par manche (modifiable)</Section>
         <div style={{fontSize:11,color:T.dim,marginBottom:6}}>
           Chaque manche/jour peut avoir des formules différentes : scramble un jour,
@@ -1891,7 +1974,7 @@ function History({openId,onConsumeOpen}){
           textOverflow:"ellipsis"}}>{g.name}</div>
         <div style={{fontSize:11,color:T.dim,whiteSpace:"nowrap",overflow:"hidden",
           textOverflow:"ellipsis"}}>
-          {g.type==="event"?(g.subtype==="ryder"?"🏆 Ryder Cup":"🏆 Tournoi"):"⛳ Partie amicale"}
+          {g.type==="event"?(g.subtype==="ryder"?"🏆 Ryder Cup":g.subtype==="coupe"?"🥊 MiniCup":"🏅 MiniChamp"):"⛳ Partie amicale"}
           {" · "}{(g.roster||[]).map(p=>dispName(p)).join(", ")}
           {" · "}{g.done?"terminé":"en cours"} · tap pour ouvrir</div>
       </div>
@@ -1955,6 +2038,9 @@ function GameDetail({g,members,courses,games,setGames,back}){
   };
   // Régénérer les confrontations (mêmes chapeaux) — pour reproposer / après édition manuelle
   const regenConfrontations=()=>save({...g,rounds:buildConfrontations(g)});
+  // COUPE (bracket) : lancer le tirage du tour 1, puis générer le tour suivant
+  const launchCoupe=()=>save({...g,rounds:drawCoupe(g.roster,g.coupeFormula||"matchplay",g.courseId,g.hcpRelative)});
+  const advanceCoupe=()=>{const nr=nextCoupeRound(g,courses);if(nr)save({...g,rounds:nr});};
   const renameTeam=(i,name)=>save({...g,teamNames:g.teamNames.map((t,j)=>j===i?name:t)});
   const [view,setView]=useState(g.done?"score":"briefing");
   // changer la formule d'un flight de tournoi (laisse la main après le tirage proposé)
@@ -2014,7 +2100,20 @@ function GameDetail({g,members,courses,games,setGames,back}){
         {g.subtype==="ryder"&&(g.hats||[]).length>0&&!g.done&&<button onClick={regenConfrontations}
           style={{...delBtn,width:"100%",marginBottom:12,fontSize:12,borderColor:T.gold,color:T.gold}}>
           🔄 Re-proposer les confrontations (mêmes chapeaux)</button>}
-        {(g.type==="event")&&<TeamManager g={g} renameTeam={renameTeam} setTeam={setTeam}/>}
+        {g.type==="event"&&g.subtype!=="coupe"&&<TeamManager g={g} renameTeam={renameTeam} setTeam={setTeam}/>}
+        {g.subtype==="coupe"&&(!g.rounds||!g.rounds.length)&&!g.done&&(
+          <div style={{...card(T.gold),marginBottom:12,textAlign:"center"}}>
+            <div style={{fontWeight:800,marginBottom:4}}>🏆 MiniCup · {FORMULA_SHORT[g.coupeFormula]||"Match Play"}</div>
+            <div style={{fontSize:11,color:T.dim,marginBottom:10}}>
+              {g.roster?.length} joueurs · tirage aléatoire en 1v1 (élimination directe).</div>
+            <button onClick={launchCoupe} style={{...addBtn,margin:0,
+              background:`linear-gradient(90deg,${T.eu},${T.us})`,color:"#fff"}}>🎲 LANCER LE TIRAGE</button>
+          </div>)}
+        {g.subtype==="coupe"&&g.rounds?.length>0&&
+          <BracketBoard g={g} courses={courses} playerById={playerById}/>}
+        {g.subtype==="coupe"&&!g.done&&g.rounds?.length>0&&nextCoupeRound(g,courses)&&
+          <button onClick={advanceCoupe} style={{...addBtn,marginBottom:12,
+            background:T.gold,color:"#1a1200"}}>▶️ Valider et générer le tour suivant</button>}
 
         {multi&&iPlay&&!g.done&&<button onClick={()=>setShowAll(s=>!s)}
           style={{...delBtn,width:"100%",marginBottom:12,fontSize:12,
@@ -2033,7 +2132,7 @@ function GameDetail({g,members,courses,games,setGames,back}){
                   padding:"2px 8px",fontSize:13}}>MANCHE {r.id}</span>
                 {rc?.name}</div>
               {subs.map(sg=>{const num=r.subgames.indexOf(sg)+1;return (<div key={sg.id}>
-                {!g.done&&(sg.validated||[]).length===0&&<div style={{display:"flex",
+                {!g.done&&g.subtype!=="coupe"&&(sg.validated||[]).length===0&&<div style={{display:"flex",
                   alignItems:"center",gap:6,margin:"4px 0"}}>
                   <span style={{fontSize:10,color:T.dim}}>Formule {r.subgames.length>1?`· P${num}`:""}</span>
                   <select value={sg.formula} onChange={e=>setSubFormula(r.id,sg.id,e.target.value)}
@@ -2065,7 +2164,7 @@ function GameDetail({g,members,courses,games,setGames,back}){
           color:g.done?T.text:"#04150b"}}>
           {g.done?"↩ Rouvrir":"✅ Valider (révéler résultats)"}</button>
         {g.subtype==="ryder"&&<RyderBoard g={g} courses={courses} playerById={playerById}/>}
-        {g.type==="event"&&g.subtype!=="ryder"&&g.done&&<EventBoard g={g} courses={courses} playerById={playerById}/>}
+        {g.type==="event"&&g.subtype!=="ryder"&&g.subtype!=="coupe"&&g.done&&<EventBoard g={g} courses={courses} playerById={playerById}/>}
         {g.done&&<ShareResults g={g} courses={courses} playerById={playerById}/>}
       </>;})()}
     </div>
@@ -2080,7 +2179,8 @@ function ShareResults({g,courses,playerById}){
     const net=g.mode==="net";
     const isTournament=!!g.rounds;
     const kind=g.subtype==="ryder"?"🏆 Ryder Cup"
-      :isTournament?"🏆 Tournoi"
+      :g.subtype==="coupe"?"🥊 MiniCup"
+      :isTournament?"🏅 MiniChamp"
       :"⛳ Partie amicale";
     const D="—————————————";
     let t=`${kind}\n${g.name}\n${net?"Net":"Brut"}\n${D}\n`;
@@ -2819,6 +2919,37 @@ function DrawHats({g,onAssign}){
 
 // Scoreboard Ryder façon EUR–USA : totaux par équipe + statut de chaque match, manche par
 // manche. 1 pt par match gagné, ½ par match nul. Visible en cours (progression jour par jour).
+// Visuel du bracket (Coupe) : tours, matchs avec vainqueur, et le champion.
+function BracketBoard({g,courses,playerById}){
+  const net=g.mode==="net";
+  const champ=coupeChampion(g,courses);
+  return (
+    <div style={{marginBottom:12}}>
+      {champ&&<div style={{...card(T.gold),textAlign:"center",marginBottom:10}}>
+        <div style={{fontSize:11,color:T.dim,letterSpacing:1}}>🏆 CHAMPION</div>
+        <div style={{fontFamily:"Anton",fontSize:26,color:T.gold}}>{dispName(playerById(champ))}</div></div>}
+      {(g.rounds||[]).map(r=>{const course=courses.find(c=>c.id===r.courseId);
+        return (
+        <div key={r.id} style={{marginBottom:6}}>
+          <div style={{fontSize:10,fontWeight:800,letterSpacing:.5,color:T.gold,
+            textTransform:"uppercase",margin:"8px 2px 4px"}}>{r.name}</div>
+          {r.subgames.map(sg=>{const ps=sg.players.map(playerById).filter(Boolean);
+            const bye=(sg.players||[]).length===1;
+            const winner=(sg.done||bye)?matchWinnerId(sg,g.roster||[],course,net):null;
+            return (
+            <div key={sg.id} style={{...card(T.line),padding:"7px 10px",marginBottom:5}}>
+              {ps.map(p=>{const win=String(winner)===String(p.id);return (
+                <div key={p.id} style={{display:"flex",justifyContent:"space-between",fontSize:13,
+                  fontWeight:win?800:600,color:win?T.accent:T.text}}>
+                  <span>{dispName(p)}</span>{win&&<span>✓</span>}</div>);})}
+              <div style={{fontSize:10,color:T.dim,marginTop:2}}>
+                {bye?"bye · qualifié":sg.done?FORMULA_SHORT[sg.formula]:`à jouer · ${FORMULA_SHORT[sg.formula]}`}</div>
+            </div>);})}
+        </div>);})}
+    </div>
+  );
+}
+
 function RyderBoard({g,courses,playerById}){
   const net=g.mode==="net";
   const [n0,n1]=g.teamNames||["Équipe 1","Équipe 2"];
