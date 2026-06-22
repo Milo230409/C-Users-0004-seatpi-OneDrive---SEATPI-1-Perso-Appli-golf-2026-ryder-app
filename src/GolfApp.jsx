@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, loadMyProfile, saveMyProfile, su
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.34 · formules variees"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.35 · ryder board"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -2063,7 +2063,8 @@ function GameDetail({g,members,courses,games,setGames,back}){
         <button onClick={toggleDone} style={{...addBtn,background:g.done?T.line:T.accent,
           color:g.done?T.text:"#04150b"}}>
           {g.done?"↩ Rouvrir":"✅ Valider (révéler résultats)"}</button>
-        {g.type==="event"&&g.done&&<EventBoard g={g} courses={courses} playerById={playerById}/>}
+        {g.subtype==="ryder"&&<RyderBoard g={g} courses={courses} playerById={playerById}/>}
+        {g.type==="event"&&g.subtype!=="ryder"&&g.done&&<EventBoard g={g} courses={courses} playerById={playerById}/>}
         {g.done&&<ShareResults g={g} courses={courses} playerById={playerById}/>}
       </>;})()}
     </div>
@@ -2811,6 +2812,71 @@ function DrawHats({g,onAssign}){
         <div style={{fontSize:11,color:T.dim,marginTop:6}}>
           Équipes appliquées ✅ — tu peux encore ajuster ci-dessous.</div>
       </div>}
+    </div>
+  );
+}
+
+// Scoreboard Ryder façon EUR–USA : totaux par équipe + statut de chaque match, manche par
+// manche. 1 pt par match gagné, ½ par match nul. Visible en cours (progression jour par jour).
+function RyderBoard({g,courses,playerById}){
+  const net=g.mode==="net";
+  const [n0,n1]=g.teamNames||["Équipe 1","Équipe 2"];
+  if(!(g.roster||[]).some(p=>p.team===0||p.team===1)) return null; // pas encore d'équipes
+  const fmt=v=>v%1>0?(Math.floor(v)?`${Math.floor(v)}½`:"½"):String(v);
+  const rounds=(g.rounds||[]).map(r=>{
+    const course=courses.find(c=>c.id===r.courseId);
+    const matches=r.subgames.map(sg=>{
+      const ps=sg.players.map(playerById).filter(Boolean);
+      const res=computeSub(sg,ps,course,net)||{};
+      const {pts}=playerScores(sg,ps,course,net);
+      const a=ps.filter(p=>p.team===0),b=ps.filter(p=>p.team===1);
+      const pa=a.reduce((s,p)=>s+(pts[p.id]||0),0),pb=b.reduce((s,p)=>s+(pts[p.id]||0),0);
+      const played=(sg.validated||[]).length>0;
+      const winner=!played?null:pa>pb?0:pb>pa?1:-1; // -1 = nul (½ partout)
+      return {sg,a,b,res,played,winner};
+    });
+    return {r,course,matches};
+  });
+  let s0=0,s1=0,Tot=0;
+  rounds.forEach(rd=>rd.matches.forEach(m=>{Tot++;if(m.played){
+    if(m.winner===0)s0++;else if(m.winner===1)s1++;else if(m.winner===-1){s0+=.5;s1+=.5;}}}));
+  const toWin=Tot%2===0?Tot/2+0.5:Math.ceil(Tot/2);
+  const lead=s0>s1?0:s1>s0?1:-1;
+  return (
+    <div style={{marginTop:14}}>
+      <div style={{display:"flex",borderRadius:14,overflow:"hidden",border:`1px solid ${T.line}`}}>
+        <div style={{flex:1,background:`linear-gradient(135deg,${T.eu},${T.eu}bb)`,padding:"12px 14px",color:"#fff"}}>
+          <div style={{fontSize:12,fontWeight:800,opacity:.95}}>{n0}</div>
+          <div style={{fontFamily:"Anton",fontSize:34,lineHeight:1}}>{fmt(s0)}</div></div>
+        <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",
+          padding:"0 10px",background:T.panel,fontSize:10,color:T.dim,textAlign:"center",lineHeight:1.2}}>
+          <span style={{fontFamily:"Anton",fontSize:16,color:T.gold}}>{fmt(toWin)}</span>pour gagner</div>
+        <div style={{flex:1,background:`linear-gradient(225deg,${T.us},${T.us}bb)`,padding:"12px 14px",color:"#fff",textAlign:"right"}}>
+          <div style={{fontSize:12,fontWeight:800,opacity:.95}}>{n1}</div>
+          <div style={{fontFamily:"Anton",fontSize:34,lineHeight:1}}>{fmt(s1)}</div></div>
+      </div>
+      <div style={{textAlign:"center",fontSize:12,fontWeight:800,color:T.accent,margin:"8px 0 2px"}}>
+        {lead===-1?"🤝 Tout est serré !":`🏆 ${lead===0?n0:n1} mène`}</div>
+      {rounds.map((rd,ri)=>(
+        <div key={ri} style={{marginTop:8}}>
+          <div style={{fontSize:10,fontWeight:800,letterSpacing:.5,color:T.dim,
+            textTransform:"uppercase",margin:"8px 2px 4px"}}>Manche {rd.r.id} · {rd.course?.name}</div>
+          {rd.matches.map((m,mi)=>{const col=t=>m.winner===t?(t===0?T.eu:T.us):T.text;
+            return (
+            <div key={mi} style={{...card(T.line),padding:"8px 10px",marginBottom:6}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:6,fontSize:12}}>
+                <span style={{flex:1,fontWeight:m.winner===0?800:600,color:col(0)}}>
+                  {m.a.map(dispName).join(" / ")||"—"}</span>
+                <span style={{fontSize:9,color:T.dim,padding:"2px 6px",background:T.bg,
+                  borderRadius:6,whiteSpace:"nowrap"}}>{FORMULA_SHORT[m.sg.formula]||""}</span>
+                <span style={{flex:1,textAlign:"right",fontWeight:m.winner===1?800:600,color:col(1)}}>
+                  {m.b.map(dispName).join(" / ")||"—"}</span>
+              </div>
+              <div style={{fontSize:11,color:m.played?T.dim:T.dim,marginTop:3,textAlign:"center"}}>
+                {m.played?m.res.summary:"⏳ à jouer"}</div>
+            </div>);})}
+        </div>
+      ))}
     </div>
   );
 }
