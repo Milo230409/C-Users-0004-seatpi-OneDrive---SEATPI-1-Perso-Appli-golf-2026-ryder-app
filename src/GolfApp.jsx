@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, loadMyProfile, saveMyProfile, su
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.33 · tirage"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.34 · formules variees"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -249,13 +249,18 @@ function buildConfrontations(g){
     if(n===6 && g.rounds.length===4 && ri===3)
       plan=[{size:3,formula:"chouette",id:1},{size:3,formula:"chouette",id:2}];
     const rot=hats.map((_,i)=>hats[(i+ri)%hats.length]); // chapeaux tournés selon la manche
-    let hi=0;const used=new Set();
+    // Formules VARIÉES (proposition ludique) : on tourne selon la manche. Modifiable à la main.
+    const F1V1=["matchplay","stableford","skins","strokeplay_net"];
+    const F2V2=["fourball","bestworst","scramble","chamble"];
+    let hi=0,c2=0,c4=0;const used=new Set();
     const subs=plan.map(fl=>{
-      let players=[];
-      if(fl.size===2 && hi<rot.length){const h=rot[hi++];players=[h.a,h.b];}
-      else if(fl.size===4 && hi+1<rot.length){const h1=rot[hi++],h2=rot[hi++];players=[h1.a,h2.a,h1.b,h2.b];}
+      let players=[],formula=fl.formula;
+      if(fl.size===2){ formula=F1V1[(ri+c2++)%F1V1.length];
+        if(hi<rot.length){const h=rot[hi++];players=[h.a,h.b];} }
+      else if(fl.size===4){ formula=F2V2[(ri+c4++)%F2V2.length];
+        if(hi+1<rot.length){const h1=rot[hi++],h2=rot[hi++];players=[h1.a,h2.a,h1.b,h2.b];} }
       players.forEach(id=>used.add(id));
-      return {id:fl.id,formula:fl.formula,players,scores:{},validated:[],done:false,hcpRelative:g.hcpRelative};
+      return {id:fl.id,formula,players,scores:{},validated:[],done:false,hcpRelative:g.hcpRelative};
     });
     // flights restants (chouette/size 3…) : on remplit avec les non-utilisés en mixant les équipes
     const remA=roster.filter(p=>!used.has(p.id)&&p.team===0);
@@ -1951,6 +1956,9 @@ function GameDetail({g,members,courses,games,setGames,back}){
   const regenConfrontations=()=>save({...g,rounds:buildConfrontations(g)});
   const renameTeam=(i,name)=>save({...g,teamNames:g.teamNames.map((t,j)=>j===i?name:t)});
   const [view,setView]=useState(g.done?"score":"briefing");
+  // changer la formule d'un flight de tournoi (laisse la main après le tirage proposé)
+  const setSubFormula=(rid,sgId,formula)=>save({...g,rounds:g.rounds.map(r=>
+    r.id!==rid?r:{...r,subgames:r.subgames.map(sg=>sg.id!==sgId?sg:{...sg,formula})})});
 
   // --- édition scores : amicale (subgames) ou tournoi (rounds[].subgames) ---
   const setScoreSimple=(sgId,pid,hole,v)=>save({...g,subgames:g.subgames.map(sg=>{
@@ -2024,6 +2032,13 @@ function GameDetail({g,members,courses,games,setGames,back}){
                   padding:"2px 8px",fontSize:13}}>MANCHE {r.id}</span>
                 {rc?.name}</div>
               {subs.map(sg=>{const num=r.subgames.indexOf(sg)+1;return (<div key={sg.id}>
+                {!g.done&&(sg.validated||[]).length===0&&<div style={{display:"flex",
+                  alignItems:"center",gap:6,margin:"4px 0"}}>
+                  <span style={{fontSize:10,color:T.dim}}>Formule {r.subgames.length>1?`· P${num}`:""}</span>
+                  <select value={sg.formula} onChange={e=>setSubFormula(r.id,sg.id,e.target.value)}
+                    style={{...inp,marginTop:0,fontSize:12,padding:"6px 8px",flex:1}}>
+                    {formulasFor(sg.players.length).map(f=>
+                      <option key={f} value={f}>{FORMULA_LABELS[f]}</option>)}</select></div>}
                 {!g.done&&<ScorerPicker sg={sg} label={r.subgames.length>1?`Partie ${num}`:null}
                   scorerId={scorerOf(sg)} canEdit={canEditSub(sg)} myId={myId}
                   players={sg.players.map(playerById).filter(Boolean)}
