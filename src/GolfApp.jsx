@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, loadMyProfile, saveMyProfile, su
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.35 · ryder board"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.36 · vignette fix"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -1886,8 +1886,9 @@ function History({openId,onConsumeOpen}){
     {games.map(g=>(<div key={g.id} onClick={()=>setOpen(g.id)}
       style={{...card(g.done?T.accent:T.gold),cursor:"pointer",
         display:"flex",alignItems:"center",gap:8}}>
-      <div style={{flex:1}}>
-        <div style={{fontWeight:800}}>{g.name}</div>
+      <div style={{flex:1,minWidth:0}}>
+        <div style={{fontWeight:800,whiteSpace:"nowrap",overflow:"hidden",
+          textOverflow:"ellipsis"}}>{g.name}</div>
         <div style={{fontSize:11,color:T.dim,whiteSpace:"nowrap",overflow:"hidden",
           textOverflow:"ellipsis"}}>
           {g.type==="event"?(g.subtype==="ryder"?"🏆 Ryder Cup":"🏆 Tournoi"):"⛳ Partie amicale"}
