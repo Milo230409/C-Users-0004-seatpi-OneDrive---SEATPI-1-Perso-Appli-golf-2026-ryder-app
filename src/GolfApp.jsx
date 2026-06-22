@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, loadMyProfile, saveMyProfile, su
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.28 · faq maj"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.29 · best-worst"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -188,17 +188,18 @@ function formulasFor(n){
   // Stableford apparaît UNE fois (le brut/net se choisit dans le 2e menu, pas ici).
   if(n===2) return ["matchplay","strokeplay_net","stableford","skins"];
   if(n===3) return ["chouette","onevonevone","stableford","skins"];
-  if(n===4) return ["fourball","foursome","mexicaine","scramble","stableford","matchplay2v2"];
+  if(n===4) return ["fourball","bestworst","foursome","mexicaine","scramble","stableford","matchplay2v2"];
   return ["stableford"];
 }
 // Formules qui se jouent uniquement en BRUT (pas de choix net) : on masque le 2e menu.
 const BRUT_ONLY=["mexicaine"];
 // Formules d'équipe 2 contre 2 : on demande qui joue avec qui.
-const TEAM_2V2=["fourball","foursome","mexicaine","scramble","matchplay2v2"];
+const TEAM_2V2=["fourball","bestworst","foursome","mexicaine","scramble","matchplay2v2"];
 const FORMULA_LABELS={matchplay:"Match Play 1v1",strokeplay_net:"Stroke Play (net) 1v1",
   stableford:"Stableford",stableford_net:"Stableford Net",stableford_gross:"Stableford Brut",
   skins:"Skins (18 pts · report)",chouette:"Chouette (6 pts · 4/2/0)",
   onevonevone:"1v1v1 (match play à 3)",fourball:"Fourball / Meilleure balle 2v2",
+  bestworst:"Meilleure & moins bonne 2v2",
   foursome:"Foursome / Greensome 2v2",mexicaine:"Mexicaine 2v2",
   scramble:"Scramble 2v2",matchplay2v2:"Match Play 2v2"};
 
@@ -671,7 +672,7 @@ function FaqTab(){
       ["🎯 2 niveaux de points","Deux choses distinctes : (1) le RÉSULTAT de la partie — qui gagne, dans le langage de la formule ; (2) les POINTS DE SAISON — un système de DUELS identique pour TOUTES les formules, qui alimente le classement. Une partie non validée = 0 point. (Net = brut − coups rendus.)"],
       ["👥 À 2 joueurs","• Match Play 1v1 : le net le plus bas gagne le trou → statut 1 UP / All Square / 2&1, mis à jour après chaque trou. • Stroke Play net : plus petit total de coups nets. • Stableford (net ou brut) : eagle 4 · birdie 3 · par 2 · bogey 1 · double+ 0. • Skins : 1 pt/trou au net le plus bas ; égalité → le point se REPORTE au trou suivant."],
       ["👥 À 3 joueurs","• Chouette (6 pts/trou) selon les 3 nets : 4/2/0 si tous différents · 3/3/0 (égalité 1er) · 4/1/1 (égalité 2e) · 2/2/2 (les 3 à égalité). • 1v1v1 : le net le plus bas du trou prend 1 pt (partagé si égalité). • Stableford et Skins : comme à 2."],
-      ["👥👥 À 4 joueurs (2 contre 2)","On compare le MEILLEUR net de chaque équipe, trou par trou. • Fourball, Foursome/Greensome, Scramble : match play d'équipe. • Match Play 2v2 : UP / All Square / 2&1. • Mexicaine (brut) : nombre à 2 chiffres/trou + bonus (par+par +5, 2 birdies +10) et inversion par birdie adverse ; le plus petit gagne, l'écart s'accumule. Le tableau live explique chaque coup spécial (« Faits de jeu »)."],
+      ["👥👥 À 4 joueurs (2 contre 2)","On compare le MEILLEUR net de chaque équipe, trou par trou. • Fourball, Foursome/Greensome, Scramble : match play d'équipe. • Match Play 2v2 : UP / All Square / 2&1. • Meilleure & moins bonne : 2 pts/trou — 1 pt pour la meilleure balle de l'équipe, 1 pt pour la moins bonne (le plus bas des 2 scores hauts) ; égalité ½–½, on cumule. • Mexicaine (brut) : nombre à 2 chiffres/trou + bonus (par+par +5, 2 birdies +10) et inversion par birdie adverse ; le plus petit gagne, l'écart s'accumule. Le tableau live explique chaque coup spécial (« Faits de jeu »)."],
     ]],
     ["🏅 Le championnat",[
       ["🏅 Les points de saison (duels)","On compte les DUELS (qui bat qui) : 1v1 → Victoire 3 · Nul 1 · Défaite 0. À 3 → 2 duels (V 2) : battre les 2 = 4. Double 2v2 → V 3 chacun. Indépendant de la formule de jeu."],
@@ -2489,7 +2490,7 @@ function LiveBoard({sg,ps,course,net,result}){
   },[sg,validated.join(",")]);// eslint-disable-line
   const rV=useMemo(()=>computeSub(sgV,ps,course,net),[sgV,ps,course,net]);
 
-  const teamFormats=["fourball","foursome","mexicaine","scramble","matchplay2v2"];
+  const teamFormats=["fourball","bestworst","foursome","mexicaine","scramble","matchplay2v2"];
   const isTeam2v2=teamFormats.includes(f) && ps.length===4;
   const anyValid=validated.length>0;
 
@@ -2880,6 +2881,25 @@ function computeSub(sg,ps,course,net){
     return {summary:win===0?"Égalité (½)":`${win>0?A:B} gagne ${Math.abs(win)} trou(s)`,
       winner:win>0?A:win<0?B:null};
   }
+  if(f==="bestworst"){
+    // « Meilleure & moins bonne » 2v2 : 2 pts/trou. 1 pt à l'équipe dont la MEILLEURE
+    // balle (net le + bas) gagne, 1 pt à l'équipe dont la MOINS BONNE balle (le + bas des
+    // deux scores hauts) gagne. Égalité = ½–½. On cumule sur 18 ; le plus gros total gagne.
+    const a=ps.slice(0,2),b=ps.slice(2,4);
+    let cumA=0,cumB=0;
+    for(let h=0;h<18;h++){
+      const an=a.map(p=>nets[p.id][h]).filter(x=>x!=null);
+      const bn=b.map(p=>nets[p.id][h]).filter(x=>x!=null);
+      if(an.length<2||bn.length<2) continue; // il faut les 2 scores de chaque équipe
+      const bestA=Math.min(...an),worstA=Math.max(...an);
+      const bestB=Math.min(...bn),worstB=Math.max(...bn);
+      if(bestA<bestB) cumA++; else if(bestB<bestA) cumB++; else {cumA+=.5;cumB+=.5;}   // meilleure balle
+      if(worstA<worstB) cumA++; else if(worstB<worstA) cumB++; else {cumA+=.5;cumB+=.5;} // moins bonne balle
+    }
+    const A=a.map(p=>dispName(p)).join("/"),B=b.map(p=>dispName(p)).join("/");
+    const lead=cumA>cumB?`${A} mène ${cumA}–${cumB} pts`:cumB>cumA?`${B} mène ${cumB}–${cumA} pts`:`Égalité ${cumA}–${cumB} pts`;
+    return {summary:lead,winner:cumA>cumB?A:cumB>cumA?B:null,teamA:cumA,teamB:cumB};
+  }
   if(f==="stableford"||f==="stableford_net"||f==="stableford_gross"){
     const par=course.par||72;const stbl={};
     ps.forEach(p=>{let pts=0;for(let h=0;h<18;h++){const s=nets[p.id][h];if(s==null)continue;
@@ -2934,6 +2954,15 @@ function playerScores(sg,ps,course,net){
     const a=ps.slice(0,2),b=ps.slice(2,4);
     const r=computeSub(sg,ps,course,net)||{};
     const cumA=r.mexA||0,cumB=r.mexB||0;
+    const av=cumA>cumB?3:cumA<cumB?0:1, bv=cumB>cumA?3:cumB<cumA?0:1;
+    const ra=cumA>cumB?'W':cumA<cumB?'L':'D', rb=cumB>cumA?'W':cumB<cumA?'L':'D';
+    const res={};a.forEach(p=>{pts[p.id]=av;res[p.id]=ra;}); b.forEach(p=>{pts[p.id]=bv;res[p.id]=rb;});
+    return {pts,h2h,res};
+  }
+  if(f==="bestworst"){
+    const a=ps.slice(0,2),b=ps.slice(2,4);
+    const r=computeSub(sg,ps,course,net)||{};
+    const cumA=r.teamA||0,cumB=r.teamB||0;
     const av=cumA>cumB?3:cumA<cumB?0:1, bv=cumB>cumA?3:cumB<cumA?0:1;
     const ra=cumA>cumB?'W':cumA<cumB?'L':'D', rb=cumB>cumA?'W':cumB<cumA?'L':'D';
     const res={};a.forEach(p=>{pts[p.id]=av;res[p.id]=ra;}); b.forEach(p=>{pts[p.id]=bv;res[p.id]=rb;});
