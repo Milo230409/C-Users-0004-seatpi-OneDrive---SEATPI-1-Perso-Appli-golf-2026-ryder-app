@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, loadMyProfile, saveMyProfile, su
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.40 · invites hors classement"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.41 · clavier couleurs"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -2424,6 +2424,14 @@ function TeamManager({g,renameTeam,setTeam}){
   );
 }
 
+// Couleur d'un score selon l'écart au par : par = vert ; sous le par = bleu (de plus en
+// plus clair vers l'eagle) ; bogey = orange ; double bogey et + = rouge.
+function scoreColor(d){
+  if(d===0) return T.accent;                        // par → vert
+  if(d>0) return d===1?"#ff9f43":"#ff5b5b";         // bogey → orange · double+ → rouge
+  const blues=["#4c8dff","#6ba6ff","#94c2ff","#bcd9ff"]; // birdie · eagle · albatros · +
+  return blues[Math.min(-d-1,blues.length-1)];
+}
 function SubGame({sg,course,mode,playerById,setScore,validateHole,done}){
   const ps=sg.players.map(playerById).filter(Boolean);
   const net=mode==="net";
@@ -2492,9 +2500,9 @@ function SubGame({sg,course,mode,playerById,setScore,validateHole,done}){
                 }}
                 style={{width:54,height:54,borderRadius:14,fontSize:22,fontWeight:800,
                   fontFamily:"Anton",cursor:v?"default":"pointer",
-                  border:`2px solid ${active?T.accent:val!=null?(vsPar<0?T.accent:vsPar>0?"#ff9b9b":T.line):T.line}`,
+                  border:`2px solid ${active?T.accent:val!=null?scoreColor(vsPar):T.line}`,
                   background:active?`${T.accent}22`:"#0c130e",opacity:v?.6:1,
-                  color:vsPar<0?"#7be0a0":vsPar>0?"#ff9b9b":T.text}}>{val??"–"}</button>
+                  color:val!=null?scoreColor(vsPar):T.text}}>{val??"–"}</button>
             </div>
           );
         })}
@@ -2516,8 +2524,7 @@ function SubGame({sg,course,mode,playerById,setScore,validateHole,done}){
               <div style={{fontSize:11,color:T.dim,marginBottom:8,textAlign:"center"}}>
                 <b style={{color:T.text}}>{dispName(padPlayer)}</b> · trou {h+1} (par {pars[h]})</div>
               <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:6}}>
-                {[1,2,3,4,5,6,7,8,9].map(n=>{const diff=n-pars[h];
-                  const col=diff<0?T.accent:diff===0?T.text:diff===1?T.gold:"#ff9b9b";
+                {[1,2,3,4,5,6,7,8,9].map(n=>{const col=scoreColor(n-pars[h]);
                   return (<button key={n} onClick={()=>enter(n)} style={{padding:"12px 0",
                     borderRadius:10,border:`1.5px solid ${col}55`,background:`${col}1a`,color:col,
                     fontSize:17,fontWeight:800,fontFamily:"Anton",cursor:"pointer"}}>{n}</button>);})}
@@ -2602,7 +2609,7 @@ function SubGame({sg,course,mode,playerById,setScore,validateHole,done}){
                           borderColor:active?T.accent:recv?"#3a7bd5":T.line,
                           borderWidth:active?2:1.5,opacity:v?.6:1,
                           background:active?`${T.accent}22`:"#0c130e",
-                          color:vsPar<0?"#7be0a0":vsPar>0?"#ff9b9b":T.text}}>{val??""}</button>
+                          color:val!=null?scoreColor(vsPar):T.text}}>{val??""}</button>
                       {recv&&<span style={{position:"absolute",top:0,right:1,width:4,height:4,
                         borderRadius:"50%",background:"#3a7bd5"}}/>}
                     </td>);})}
