@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, loadMyProfile, saveMyProfile, su
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.39 · minicup-minichamp"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.40 · invites hors classement"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -1479,28 +1479,33 @@ function computeStandings(done, courses){
       // perd ensemble, pas de carte individuelle). +5 trophée à l'équipe championne.
       const teamWins=[0,0];
       subs.forEach(({sg,course})=>{
-        const ps=sg.players.map(id=>g.roster.find(p=>p.id===id)).filter(Boolean);
-        if(!counts(ps)) return; // pas assez de membres → ne compte pas au classement
+        const psAll=sg.players.map(id=>g.roster.find(p=>p.id===id)).filter(Boolean);
+        if(!counts(psAll)) return; // pas assez de membres → ne compte pas au classement
+        const ps=psAll.filter(isMember);
+        if(ps.length!==psAll.length) return; // invité dans un match d'équipe → non compté
         const {pts}=playerScores(sg,ps,course,net);
         const ts=[0,0];
         ps.forEach(p=>{ if(p.team===0||p.team===1) ts[p.team]+=(pts[p.id]||0); });
         const winT=ts[0]>ts[1]?0:ts[1]>ts[0]?1:null;
         if(winT!=null) teamWins[winT]++;
-        g.roster.forEach(p=>{ if(p.team!==0&&p.team!==1) return;
+        g.roster.forEach(p=>{ if(p.team!==0&&p.team!==1) return; if(!isMember(p)) return; // exclure les invités
           const s=ensure(p.id); s.played++;
           if(winT==null){s.pts+=1;s.draw++;}
           else if(p.team===winT){s.pts+=3;s.win++;}
           else s.loss++; });
       });
       const champ=teamWins[0]>teamWins[1]?0:teamWins[1]>teamWins[0]?1:null;
-      if(champ!=null) g.roster.forEach(p=>{ if(p.team===champ&&S[p.id]) S[p.id].pts+=5; });
+      if(champ!=null) g.roster.forEach(p=>{ if(p.team===champ&&isMember(p)&&S[p.id]) S[p.id].pts+=5; });
       return;
     }
     // INDIVIDUEL (amicale ou tournoi individuel) : points par duels + confrontations + bonus
     const gamePts={};
     subs.forEach(({sg,course})=>{
-      const ps=sg.players.map(id=>g.roster.find(p=>p.id===id)).filter(Boolean);
-      if(!counts(ps)) return; // pas assez de membres → ne compte pas au classement
+      const psAll=sg.players.map(id=>g.roster.find(p=>p.id===id)).filter(Boolean);
+      if(!counts(psAll)) return; // pas assez de membres → ne compte pas au classement
+      // EXCLURE LES INVITÉS : seuls les duels MEMBRE contre MEMBRE comptent au classement
+      const ps=psAll.filter(isMember);
+      if(TEAM_2V2.includes(sg.formula) && ps.length!==psAll.length) return; // invité dans une équipe → non compté
       const {pts,h2h,res}=playerScores(sg,ps,course,net);
       Object.entries(pts).forEach(([id,pt])=>{
         const s=ensure(id);s.pts+=pt;s.played++;gamePts[id]=(gamePts[id]||0)+pt;
@@ -1532,14 +1537,15 @@ function seasonImpact(g, games, courses){
   const rankMap=S=>{const m={};Object.entries(S).map(([id,s])=>({id,pts:s.pts}))
     .sort((x,y)=>y.pts-x.pts).forEach((e,i)=>m[e.id]=i+1);return m;};
   const aR=rankMap(afterS), bR=rankMap(beforeS);
-  const ids=[...new Set((g.roster||[]).map(p=>p.id))];
+  // EXCLURE LES INVITÉS de l'évolution au classement
+  const isMember=p=>p?.member===true||/^seed-/.test(String(p?.id));
+  const ids=[...new Set((g.roster||[]).filter(isMember).map(p=>p.id))];
   const lines=ids.map(id=>{const a=afterS[id]||{pts:0}, b=beforeS[id]||{pts:0};
     const ar=aR[id]||null, br=bR[id]||null;
     return {id, gained:Math.round(((a.pts||0)-(b.pts||0))*10)/10, total:a.pts||0,
       rank:ar, delta:(ar&&br)?(br-ar):null, isNew:!!(ar&&!br)}; // delta>0 = a gagné des places
   }).sort((x,y)=>(x.rank||99)-(y.rank||99)); // ordre du classement général
   // la partie compte-t-elle au classement ? (≥2 membres dans au moins une confrontation)
-  const isMember=p=>p?.member===true||/^seed-/.test(String(p?.id));
   const subs=g.rounds?g.rounds.flatMap(r=>r.subgames||[]):(g.subgames||[]);
   const counted=subs.some(sg=>(sg.players||[]).map(id=>(g.roster||[]).find(p=>p.id===id))
     .filter(Boolean).filter(isMember).length>=2);
