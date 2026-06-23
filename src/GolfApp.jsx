@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef, createContext, useContext } from "react";
 import { supabase, supabaseEnabled } from "./supabaseClient";
-import { loadGroup, upsertEntity, deleteEntity, loadMyProfile, saveMyProfile, subscribeGroup } from "./supabaseSync";
+import { loadGroup, upsertEntity, deleteEntity, deleteGameByDataId, dedupeGamesCloud, loadMyProfile, saveMyProfile, subscribeGroup } from "./supabaseSync";
 
 /* ============================================================
    GOLF CLUB APP v3 — Parties du WE + Événements
@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, loadMyProfile, saveMyProfile, su
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.42 · dedup classement"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.43 · nettoyage doublons"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -446,8 +446,16 @@ export default function App(){
   // suppression DÉFINITIVE d'une partie : il FAUT supprimer la ligne cloud,
   // sinon la partie revient au resync (cause du bug "je n'arrive pas à supprimer").
   const removeGame=async(game)=>{
-    setGames(games.filter(x=>x.id!==game.id));
-    if(cloud && game._row) await deleteEntity("games", game._row);
+    setGames(games.filter(x=>String(x.id)!==String(game.id)));
+    // suppression DÉFINITIVE : on retire TOUTES les lignes de cette partie (doublons inclus)
+    if(cloud) await deleteGameByDataId(game.id);
+  };
+  // Nettoyage des doublons de parties dans le cloud (réservé admin) + resync
+  const cleanupDuplicates=async()=>{
+    const n=cloud?await dedupeGamesCloud():0;
+    const grp=cloud?await loadGroup():null;
+    if(grp){ setGames(grp.games||[]); setMembers(grp.players||[]); setCourses(grp.courses||[]); }
+    return n;
   };
   const saveMembers=async(next)=>{ setMembers(next);
     if(cloud){ for(const m of next){ await upsertEntity("players",m,null); } } };
@@ -480,7 +488,7 @@ export default function App(){
   return (
     <Ctx.Provider value={{user,setUser,members,setMembers:saveMembers,
       games,setGames:saveGames,removeGame,courses,setCourses:saveCourses,
-      cloud,syncing,admin:isAdmin(user)}}>
+      cloud,syncing,admin:isAdmin(user),cleanupDuplicates}}>
     <div style={shell}>
       <style>{GLOBAL_CSS}</style>
       <Header user={user} onLogout={LOGIN_ENABLED?logout:null} setTab={setTab} admin={isAdmin(user)}/>
@@ -1959,8 +1967,13 @@ function HoleEditor({c,upd}){
 }
 
 function History({openId,onConsumeOpen}){
-  const {games,setGames,members,courses,removeGame,admin}=useContext(Ctx);
+  const {games,setGames,members,courses,removeGame,admin,cloud,cleanupDuplicates}=useContext(Ctx);
   const [open,setOpen]=useState(openId||null);
+  const [cleaning,setCleaning]=useState("");
+  const doCleanup=async()=>{ setCleaning("…");
+    const n=await cleanupDuplicates();
+    setCleaning(n>0?`✅ ${n} doublon(s) supprimé(s)`:"✅ Aucun doublon");
+    setTimeout(()=>setCleaning(""),3000); };
   useEffect(()=>{ if(openId){ setOpen(openId); onConsumeOpen&&onConsumeOpen(); } },[openId]);
   const isMember=p=>p.member===true||/^seed-/.test(String(p.id));
   const delGame=(id,e)=>{e.stopPropagation();
@@ -1975,6 +1988,11 @@ function History({openId,onConsumeOpen}){
     if(g) return <GameDetail g={g} members={members} courses={courses} games={games}
       setGames={setGames} back={()=>setOpen(null)}/>;}
   return (<div><Section>Historique ({games.length})</Section>
+    {admin&&cloud&&<div style={{marginBottom:10}}>
+      <button onClick={doCleanup} style={{...delBtn,width:"100%",fontSize:12,
+        borderColor:T.gold,color:T.gold}}>🧹 Nettoyer les doublons (réparer le classement)</button>
+      {cleaning&&<div style={{fontSize:11,color:T.accent,textAlign:"center",marginTop:4}}>{cleaning}</div>}
+    </div>}
     {games.map(g=>(<div key={g.id} onClick={()=>setOpen(g.id)}
       style={{...card(g.done?T.accent:T.gold),cursor:"pointer",
         display:"flex",alignItems:"center",gap:8}}>

@@ -54,6 +54,29 @@ export async function deleteEntity(table, rowId) {
   await supabase.from(table).delete().eq("id", rowId);
 }
 
+// Supprime TOUTES les lignes d'une partie (par data.id) — suppression définitive,
+// même s'il y a des doublons (sinon la partie « revient » au resync).
+export async function deleteGameByDataId(dataId) {
+  if (!supabaseEnabled || dataId == null) return;
+  await supabase.from("games").delete().eq("data->>id", String(dataId));
+}
+
+// Nettoie les doublons de parties dans le cloud (garde la PLUS RÉCENTE par data.id).
+// Renvoie le nombre de lignes supprimées.
+export async function dedupeGamesCloud() {
+  if (!supabaseEnabled) return 0;
+  const { data } = await supabase
+    .from("games").select("id,data,updated_at").order("updated_at", { ascending: false });
+  const seen = new Set(), toDelete = [];
+  for (const r of (data || [])) {
+    const id = r.data?.id;
+    const key = id != null ? `id:${id}` : `row:${r.id}`;
+    if (seen.has(key)) toDelete.push(r.id); else seen.add(key);
+  }
+  for (const rid of toDelete) { await supabase.from("games").delete().eq("id", rid); }
+  return toDelete.length;
+}
+
 // ---- profil de l'utilisateur connecté ----
 export async function loadMyProfile(userId) {
   if (!supabaseEnabled) return null;
