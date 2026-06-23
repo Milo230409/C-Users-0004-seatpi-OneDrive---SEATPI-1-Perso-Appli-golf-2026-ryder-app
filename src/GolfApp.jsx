@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, deleteGameByDataId, dedupeGamesC
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.43 · nettoyage doublons"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.44 · detail classement"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -1470,7 +1470,8 @@ function CourseAutocomplete({courses,setCourses,courseId,setCourseId}){
 // Classement de saison à partir des parties terminées → {S:id->{pts,played,win,draw,loss}, H}.
 // Réutilisé pour le championnat ET le résumé de fin de partie.
 function computeStandings(done, courses){
-  const S={}, H={};
+  const S={}, H={}, D={}; // D : id -> [{id,name,pts}] détail des points par partie
+  const detail=(id,gid,name,pts)=>{(D[id]=D[id]||[]).push({id:gid,name,pts});};
   // sécurité : on ne compte chaque partie qu'UNE fois (au cas où un doublon traînerait)
   {const seen=new Set();done=(done||[]).filter(g=>{const k=String(g.id);
     if(seen.has(k))return false;seen.add(k);return true;});}
@@ -1488,7 +1489,7 @@ function computeStandings(done, courses){
     if(teamTournament){
       // SOLIDARITÉ : chaque match d'équipe compte pour TOUS les coéquipiers (on gagne et on
       // perd ensemble, pas de carte individuelle). +5 trophée à l'équipe championne.
-      const teamWins=[0,0];
+      const teamWins=[0,0]; const gp={};
       subs.forEach(({sg,course})=>{
         const psAll=sg.players.map(id=>g.roster.find(p=>p.id===id)).filter(Boolean);
         if(!counts(psAll)) return; // pas assez de membres → ne compte pas au classement
@@ -1501,12 +1502,12 @@ function computeStandings(done, courses){
         if(winT!=null) teamWins[winT]++;
         g.roster.forEach(p=>{ if(p.team!==0&&p.team!==1) return; if(!isMember(p)) return; // exclure les invités
           const s=ensure(p.id); s.played++;
-          if(winT==null){s.pts+=1;s.draw++;}
-          else if(p.team===winT){s.pts+=3;s.win++;}
-          else s.loss++; });
+          let add; if(winT==null){add=1;s.draw++;} else if(p.team===winT){add=3;s.win++;} else {add=0;s.loss++;}
+          s.pts+=add; gp[p.id]=(gp[p.id]||0)+add; });
       });
       const champ=teamWins[0]>teamWins[1]?0:teamWins[1]>teamWins[0]?1:null;
-      if(champ!=null) g.roster.forEach(p=>{ if(p.team===champ&&isMember(p)&&S[p.id]) S[p.id].pts+=5; });
+      if(champ!=null) g.roster.forEach(p=>{ if(p.team===champ&&isMember(p)&&S[p.id]){ S[p.id].pts+=5; gp[p.id]=(gp[p.id]||0)+5; } });
+      Object.entries(gp).forEach(([id,pt])=>detail(id,g.id,g.name,pt));
       return;
     }
     // INDIVIDUEL (amicale ou tournoi individuel) : points par duels + confrontations + bonus
@@ -1533,10 +1534,13 @@ function computeStandings(done, courses){
     if(g.rounds){ // tournoi individuel : +5 au meilleur total de la partie
       const ids=Object.keys(gamePts);
       if(ids.length){ const mx=Math.max(...ids.map(id=>gamePts[id]));
-        ids.filter(id=>gamePts[id]===mx).forEach(id=>{ if(S[id]) S[id].pts+=5; }); }
+        ids.filter(id=>gamePts[id]===mx).forEach(id=>{ if(S[id]){ S[id].pts+=5; gamePts[id]+=5; } }); }
     }
+    Object.entries(gamePts).forEach(([id,pt])=>detail(id,g.id,g.name,pt));
   });
-  return {S,H};
+  // « parties jouées » = nombre de PARTIES distinctes (pas de manches) → moyenne juste
+  Object.keys(S).forEach(id=>{ S[id].played=(D[id]||[]).length; });
+  return {S,H,D};
 }
 
 // Impact d'une partie sur le classement de saison : points gagnés + nouveau total/rang.
@@ -1567,6 +1571,7 @@ function Championship(){
   const {games,members,courses}=useContext(Ctx);
   const done=games.filter(g=>g.done);
   const stats=useMemo(()=>computeStandings(done,courses),[done,courses]);
+  const [openP,setOpenP]=useState(null);
 
   const rows=members.map(m=>({m,...(stats.S[m.id]||{pts:0,played:0,win:0,draw:0,loss:0})}))
     .map(r=>({...r,avg:r.played?r.pts/r.played:0}));
@@ -1593,6 +1598,29 @@ function Championship(){
         <RankCol title="🔢 CUMULÉ" rows={byTotal} metric={r=>r.pts} unit="pts"/>
         <RankCol title="📊 MOYENNE" rows={byAvg} metric={r=>r.avg.toFixed(2)} unit="pts/p."/>
       </div>
+
+      <Section>🔎 Détail des points</Section>
+      <div style={{fontSize:11,color:T.dim,marginBottom:6}}>
+        Tape un joueur pour voir d'où viennent ses points, partie par partie.</div>
+      {byTotal.map(r=>{const det=stats.D[r.m.id]||[];const op=openP===r.m.id;return (
+        <div key={r.m.id} style={{...card(T.line),marginBottom:6}}>
+          <div onClick={()=>setOpenP(op?null:r.m.id)} style={{display:"flex",
+            justifyContent:"space-between",alignItems:"center",cursor:"pointer"}}>
+            <span style={{fontWeight:700}}>{dispName(r.m)}</span>
+            <span style={{fontSize:12,color:T.dim}}>
+              <b style={{color:T.accent}}>{r.pts} pts</b> · {r.played} partie{r.played>1?"s":""} {op?"▾":"▸"}</span>
+          </div>
+          {op&&<div style={{marginTop:6,borderTop:`1px solid ${T.line}`,paddingTop:6}}>
+            {det.map((d,i)=>(
+              <div key={i} style={{display:"flex",justifyContent:"space-between",
+                fontSize:12,marginBottom:3,gap:8}}>
+                <span style={{flex:1,color:T.dim,overflow:"hidden",textOverflow:"ellipsis",
+                  whiteSpace:"nowrap"}}>{d.name||"Partie"}</span>
+                <span style={{fontWeight:800,color:d.pts>0?T.accent:T.dim}}>+{d.pts}</span>
+              </div>))}
+            {!det.length&&<div style={{fontSize:11,color:T.dim}}>Aucune partie comptée.</div>}
+          </div>}
+        </div>);})}
 
       <Section>Confrontations (face-à-face)</Section>
       <H2HTable H={stats.H} members={members}/>
