@@ -54,11 +54,14 @@ export async function deleteEntity(table, rowId) {
   await supabase.from(table).delete().eq("id", rowId);
 }
 
-// Supprime TOUTES les lignes d'une partie (par data.id) — suppression définitive,
-// même s'il y a des doublons (sinon la partie « revient » au resync).
+// Supprime TOUTES les lignes d'une partie (par data.id) — suppression définitive et fiable,
+// même s'il y a des doublons (sinon la partie « revient » au resync et ses points restent).
+// On récupère les lignes puis on supprime par id (clé primaire) = plus robuste qu'un filtre jsonb.
 export async function deleteGameByDataId(dataId) {
   if (!supabaseEnabled || dataId == null) return;
-  await supabase.from("games").delete().eq("data->>id", String(dataId));
+  const { data } = await supabase.from("games").select("id,data");
+  const rows = (data || []).filter(r => String(r.data?.id) === String(dataId));
+  for (const r of rows) { await supabase.from("games").delete().eq("id", r.id); }
 }
 
 // Nettoie les doublons de parties dans le cloud (garde la PLUS RÉCENTE par data.id).
