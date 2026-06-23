@@ -10,13 +10,27 @@ export async function loadGroup() {
   if (!supabaseEnabled) return null;
   const [g, p, c] = await Promise.all([
     supabase.from("games").select("id,data,done,updated_at").order("updated_at", { ascending: false }),
-    supabase.from("players").select("id,data,updated_at"),
-    supabase.from("courses").select("id,data,updated_at"),
+    supabase.from("players").select("id,data,updated_at").order("updated_at", { ascending: false }),
+    supabase.from("courses").select("id,data,updated_at").order("updated_at", { ascending: false }),
   ]);
+  // DÉDUPLICATION : si plusieurs lignes ont le même data.id (doublons cloud d'avant le
+  // correctif de synchro), on ne garde que la plus récente (1re en ordre décroissant).
+  // Sinon une même partie serait comptée plusieurs fois au classement.
+  const dedup = rows => {
+    const seen = new Set(), out = [];
+    for (const r of (rows || [])) {
+      const id = r.data?.id;
+      const key = id != null ? `id:${id}` : `row:${r.id}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ ...r.data, _row: r.id });
+    }
+    return out;
+  };
   return {
-    games:   (g.data || []).map(r => ({ ...r.data, _row: r.id })),
-    players: (p.data || []).map(r => ({ ...r.data, _row: r.id })),
-    courses: (c.data || []).map(r => ({ ...r.data, _row: r.id })),
+    games:   dedup(g.data),
+    players: dedup(p.data),
+    courses: dedup(c.data),
     errors: [g.error, p.error, c.error].filter(Boolean),
   };
 }

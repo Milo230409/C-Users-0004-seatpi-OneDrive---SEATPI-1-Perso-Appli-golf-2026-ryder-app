@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, loadMyProfile, saveMyProfile, su
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.41 · clavier couleurs"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.42 · dedup classement"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -1463,6 +1463,9 @@ function CourseAutocomplete({courses,setCourses,courseId,setCourseId}){
 // Réutilisé pour le championnat ET le résumé de fin de partie.
 function computeStandings(done, courses){
   const S={}, H={};
+  // sécurité : on ne compte chaque partie qu'UNE fois (au cas où un doublon traînerait)
+  {const seen=new Set();done=(done||[]).filter(g=>{const k=String(g.id);
+    if(seen.has(k))return false;seen.add(k);return true;});}
   const ensure=id=>{if(!S[id])S[id]={pts:0,played:0,win:0,draw:0,loss:0};return S[id];};
   // RÈGLE CLASSEMENT : tout le monde peut jouer, mais une confrontation ne compte au
   // classement que si AU MOINS 2 membres G&A y participent (sinon : ignorée).
