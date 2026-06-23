@@ -77,6 +77,12 @@ export async function dedupeGamesCloud() {
   return toDelete.length;
 }
 
+// Supprime TOUTES les parties (repartir à zéro pour une nouvelle saison).
+export async function deleteAllGames() {
+  if (!supabaseEnabled) return;
+  await supabase.from("games").delete().not("id", "is", null);
+}
+
 // ---- profil de l'utilisateur connecté ----
 export async function loadMyProfile(userId) {
   if (!supabaseEnabled) return null;

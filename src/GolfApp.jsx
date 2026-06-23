@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef, createContext, useContext } from "react";
 import { supabase, supabaseEnabled } from "./supabaseClient";
-import { loadGroup, upsertEntity, deleteEntity, deleteGameByDataId, dedupeGamesCloud, loadMyProfile, saveMyProfile, subscribeGroup } from "./supabaseSync";
+import { loadGroup, upsertEntity, deleteEntity, deleteGameByDataId, dedupeGamesCloud, deleteAllGames, loadMyProfile, saveMyProfile, subscribeGroup } from "./supabaseSync";
 
 /* ============================================================
    GOLF CLUB APP v3 — Parties du WE + Événements
@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, deleteGameByDataId, dedupeGamesC
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.44 · detail classement"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.45 · reset saison"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -457,6 +457,8 @@ export default function App(){
     if(grp){ setGames(grp.games||[]); setMembers(grp.players||[]); setCourses(grp.courses||[]); }
     return n;
   };
+  // Tout supprimer (repartir à zéro pour une nouvelle saison) — réservé admin
+  const clearAllGames=async()=>{ setGames([]); if(cloud) await deleteAllGames(); };
   const saveMembers=async(next)=>{ setMembers(next);
     if(cloud){ for(const m of next){ await upsertEntity("players",m,null); } } };
   const saveCourses=async(next)=>{ setCourses(next);
@@ -488,7 +490,7 @@ export default function App(){
   return (
     <Ctx.Provider value={{user,setUser,members,setMembers:saveMembers,
       games,setGames:saveGames,removeGame,courses,setCourses:saveCourses,
-      cloud,syncing,admin:isAdmin(user),cleanupDuplicates}}>
+      cloud,syncing,admin:isAdmin(user),cleanupDuplicates,clearAllGames}}>
     <div style={shell}>
       <style>{GLOBAL_CSS}</style>
       <Header user={user} onLogout={LOGIN_ENABLED?logout:null} setTab={setTab} admin={isAdmin(user)}/>
@@ -1995,13 +1997,17 @@ function HoleEditor({c,upd}){
 }
 
 function History({openId,onConsumeOpen}){
-  const {games,setGames,members,courses,removeGame,admin,cloud,cleanupDuplicates}=useContext(Ctx);
+  const {games,setGames,members,courses,removeGame,admin,cloud,cleanupDuplicates,clearAllGames}=useContext(Ctx);
   const [open,setOpen]=useState(openId||null);
   const [cleaning,setCleaning]=useState("");
   const doCleanup=async()=>{ setCleaning("…");
     const n=await cleanupDuplicates();
     setCleaning(n>0?`✅ ${n} doublon(s) supprimé(s)`:"✅ Aucun doublon");
     setTimeout(()=>setCleaning(""),3000); };
+  const doClearAll=async()=>{
+    if(!confirm("Supprimer DÉFINITIVEMENT TOUTES les parties et repartir à zéro ?\n(le classement sera vidé — utile pour effacer les parties de test)")) return;
+    if(!confirm("Es-tu sûr ? Cette action est irréversible.")) return;
+    await clearAllGames(); };
   useEffect(()=>{ if(openId){ setOpen(openId); onConsumeOpen&&onConsumeOpen(); } },[openId]);
   const isMember=p=>p.member===true||/^seed-/.test(String(p.id));
   const delGame=(id,e)=>{e.stopPropagation();
@@ -2016,10 +2022,12 @@ function History({openId,onConsumeOpen}){
     if(g) return <GameDetail g={g} members={members} courses={courses} games={games}
       setGames={setGames} back={()=>setOpen(null)}/>;}
   return (<div><Section>Historique ({games.length})</Section>
-    {admin&&cloud&&<div style={{marginBottom:10}}>
-      <button onClick={doCleanup} style={{...delBtn,width:"100%",fontSize:12,
-        borderColor:T.gold,color:T.gold}}>🧹 Nettoyer les doublons (réparer le classement)</button>
-      {cleaning&&<div style={{fontSize:11,color:T.accent,textAlign:"center",marginTop:4}}>{cleaning}</div>}
+    {admin&&<div style={{marginBottom:10,display:"flex",flexDirection:"column",gap:6}}>
+      {cloud&&<button onClick={doCleanup} style={{...delBtn,width:"100%",fontSize:12,
+        borderColor:T.gold,color:T.gold}}>🧹 Nettoyer les doublons (réparer le classement)</button>}
+      {cleaning&&<div style={{fontSize:11,color:T.accent,textAlign:"center"}}>{cleaning}</div>}
+      <button onClick={doClearAll} style={{...delBtn,width:"100%",fontSize:12,
+        borderColor:T.us,color:T.us}}>🗑️ Tout supprimer · repartir à zéro (test → vraie saison)</button>
     </div>}
     {games.map(g=>(<div key={g.id} onClick={()=>setOpen(g.id)}
       style={{...card(g.done?T.accent:T.gold),cursor:"pointer",
