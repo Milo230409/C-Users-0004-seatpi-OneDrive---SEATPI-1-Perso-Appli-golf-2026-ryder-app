@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, deleteGameByDataId, dedupeGamesC
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.46 · suppression fiable"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.47 · 2v2 membres"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -1495,11 +1495,11 @@ function computeStandings(done, courses){
       subs.forEach(({sg,course})=>{
         const psAll=sg.players.map(id=>g.roster.find(p=>p.id===id)).filter(Boolean);
         if(!counts(psAll)) return; // pas assez de membres → ne compte pas au classement
-        const ps=psAll.filter(isMember);
-        if(ps.length!==psAll.length) return; // invité dans un match d'équipe → non compté
-        const {pts}=playerScores(sg,ps,course,net);
+        // on calcule sur l'équipe COMPLÈTE (invités compris pour le résultat) ; seuls les
+        // MEMBRES marquent les points (boucle ci-dessous filtre déjà les invités).
+        const {pts}=playerScores(sg,psAll,course,net);
         const ts=[0,0];
-        ps.forEach(p=>{ if(p.team===0||p.team===1) ts[p.team]+=(pts[p.id]||0); });
+        psAll.forEach(p=>{ if(p.team===0||p.team===1) ts[p.team]+=(pts[p.id]||0); });
         const winT=ts[0]>ts[1]?0:ts[1]>ts[0]?1:null;
         if(winT!=null) teamWins[winT]++;
         g.roster.forEach(p=>{ if(p.team!==0&&p.team!==1) return; if(!isMember(p)) return; // exclure les invités
@@ -1517,11 +1517,15 @@ function computeStandings(done, courses){
     subs.forEach(({sg,course})=>{
       const psAll=sg.players.map(id=>g.roster.find(p=>p.id===id)).filter(Boolean);
       if(!counts(psAll)) return; // pas assez de membres → ne compte pas au classement
-      // EXCLURE LES INVITÉS : seuls les duels MEMBRE contre MEMBRE comptent au classement
-      const ps=psAll.filter(isMember);
-      if(TEAM_2V2.includes(sg.formula) && ps.length!==psAll.length) return; // invité dans une équipe → non compté
-      const {pts,h2h,res}=playerScores(sg,ps,course,net);
+      const isTeam=TEAM_2V2.includes(sg.formula);
+      // Équipe (2v2) : on calcule sur l'équipe COMPLÈTE (invité compris pour déterminer qui
+      // gagne), puis on n'attribue les points QU'AUX MEMBRES. Non-équipe : seuls les duels
+      // MEMBRE contre MEMBRE comptent (les invités sont retirés du calcul).
+      const scoring = isTeam ? psAll : psAll.filter(isMember);
+      const {pts,h2h,res}=playerScores(sg,scoring,course,net);
       Object.entries(pts).forEach(([id,pt])=>{
+        const pl=psAll.find(p=>String(p.id)===String(id));
+        if(!isMember(pl)) return; // les INVITÉS ne marquent jamais
         const s=ensure(id);s.pts+=pt;s.played++;gamePts[id]=(gamePts[id]||0)+pt;
         const r=res?.[id];
         if(r==='W')s.win++;else if(r==='D')s.draw++;else s.loss++;});
