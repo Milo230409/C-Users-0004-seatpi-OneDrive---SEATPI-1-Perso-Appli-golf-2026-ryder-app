@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, deleteGameByDataId, dedupeGamesC
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.49 · courbe évolution"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.50 · courbe confrontation"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -2809,59 +2809,156 @@ function stablefordNet(sg,p,course,validated){
     pts+=d<=-2?4:d===-1?3:d===0?2:d===1?1:0;});
   return pts;
 }
-/* ===== Courbe d'évolution trou par trou (Stableford cumulé, "plus haut = mieux") ===== */
+/* ===== Série d'évolution de la CONFRONTATION (selon la formule), trou par trou =====
+   - match play / fourball-like → MARGE (1 UP / All Square / 1 DOWN)
+   - mexicaine, bestworst → points cumulés des 2 équipes
+   - chouette → points cumulés par joueur · stableford/skins → points cumulés
+   - 1v1v1 / stroke net → score net cumulé vs par (plus bas = mieux)
+   On réutilise les calculs existants (computeSub) pour rester fidèle au score affiché. */
 const EVO_PALETTE=["#3ddc84","#4c8dff","#ffd24a","#ff7b9c","#a78bfa","#ff9f43","#2dd4bf","#f9a8d4"];
-function EvolutionChart({sg,ps,course,net}){
+function confrontationSeries(sg,ps,course,net){
+  if(!course||ps.length<2) return null;
+  const f=sg.formula;
   const validated=(sg.validated||[]).slice().sort((a,b)=>a-b);
+  const useNet = f==="stableford_net"?true : f==="stableford_gross"?false : (net && !BRUT_ONLY.includes(f));
   const pars=holePars(course);
-  const useNet=net && !BRUT_ONLY.includes(sg.formula); // mexicaine = brut only
-  const series=ps.map((p,idx)=>{
-    const strokes=useNet?strokesPerHole(effChp(p,[p],course,false),course?.si||[]):new Array(18).fill(0);
-    let cum=0; const pts=[];
-    validated.forEach(h=>{
-      const g=sg.scores?.[p.id]?.[h];
-      if(g!=null){const s=g-(strokes[h]||0),d=s-pars[h];
-        cum+=d<=-2?4:d===-1?3:d===0?2:d===1?1:0;}
-      pts.push({h,v:cum});
-    });
-    return {p,pts,total:cum,color:EVO_PALETTE[idx%EVO_PALETTE.length]};
-  }).sort((a,b)=>b.total-a.total);
-  const hasData=validated.length>0;
-  const maxV=Math.max(4,...series.flatMap(s=>s.pts.map(pt=>pt.v)));
-  const W=320,H=132,padL=8,padR=8,padT=10,padB=20;
+  const strokes={}; ps.forEach(p=>{strokes[p.id]=useNet?strokesPerHole(effChp(p,ps,course,sg.hcpRelative),course?.si||[]):new Array(18).fill(0);});
+  const netOf=(p,h)=>{const g=sg.scores?.[p.id]?.[h];return g==null?null:g-(strokes[p.id][h]||0);};
+  const dn=p=>dispName(p);
+
+  // 1) MATCH PLAY (1v1) & fourball-like → courbe de MARGE (1 UP / AS / 1 DOWN)
+  if(["matchplay","matchplay2v2","fourball","foursome","scramble","chamble"].includes(f)){
+    const a=f==="matchplay"?[ps[0]]:ps.slice(0,2);
+    const b=f==="matchplay"?[ps[1]]:ps.slice(2,4);
+    const th=(team,h)=>{const v=team.map(p=>netOf(p,h)).filter(x=>x!=null);return v.length?Math.min(...v):null;};
+    let win=0; const line=[];
+    validated.forEach(h=>{const e=th(a,h),u=th(b,h);if(e!=null&&u!=null){if(e<u)win++;else if(u<e)win--;}line.push({h,v:win});});
+    return {kind:"margin",labelA:a.map(dn).join(" / "),labelB:b.map(dn).join(" / "),line,sub:"Statut du match, trou par trou"};
+  }
+
+  // computeSub sur les seuls trous joués jusqu'à un point donné (logiques complexes réutilisées)
+  const runAt=(holes)=>{const scores={};ps.forEach(p=>{scores[p.id]={};
+    holes.forEach(h=>{const v=sg.scores?.[p.id]?.[h];if(v!=null)scores[p.id][h]=v;});});
+    return computeSub({...sg,scores,validated:[...holes]},ps,course,net)||{};};
+
+  // 2) MEXICAINE / BESTWORST → points cumulés des 2 équipes
+  if(f==="mexicaine"||f==="bestworst"){
+    const a=ps.slice(0,2),b=ps.slice(2,4),sA=[],sB=[];
+    validated.forEach((h,i)=>{const r=runAt(validated.slice(0,i+1));
+      sA.push({h,v:(f==="mexicaine"?r.mexA:r.teamA)||0});
+      sB.push({h,v:(f==="mexicaine"?r.mexB:r.teamB)||0});});
+    return {kind:"lines",unit:"pts",sub:"Points cumulés de la confrontation",
+      series:[{name:a.map(dn).join("/"),pts:sA,color:EVO_PALETTE[0],total:sA.length?sA[sA.length-1].v:0},
+              {name:b.map(dn).join("/"),pts:sB,color:EVO_PALETTE[1],total:sB.length?sB[sB.length-1].v:0}]};
+  }
+
+  // 3) CHOUETTE → points cumulés par joueur (4/2/0…)
+  if(f==="chouette"){
+    const acc={};ps.forEach(p=>acc[p.id]=[]);
+    validated.forEach((h,i)=>{const r=runAt(validated.slice(0,i+1));ps.forEach(p=>acc[p.id].push({h,v:r.pts?.[p.id]||0}));});
+    const series=ps.map((p,idx)=>({name:dn(p),pts:acc[p.id],color:EVO_PALETTE[idx%EVO_PALETTE.length],
+      total:acc[p.id].length?acc[p.id][acc[p.id].length-1].v:0})).sort((a,b)=>b.total-a.total);
+    return {kind:"lines",unit:"pts",sub:"Points cumulés (chouette)",series};
+  }
+
+  // 4) STABLEFORD → points cumulés par joueur
+  if(["stableford","stableford_net","stableford_gross"].includes(f)){
+    const parH=Math.round((course.par||72)/18);
+    const series=ps.map((p,idx)=>{let cum=0;const pts=[];
+      validated.forEach(h=>{const s=netOf(p,h);if(s!=null)cum+=Math.max(0,2+(parH-s));pts.push({h,v:cum});});
+      return {name:dn(p),pts,color:EVO_PALETTE[idx%EVO_PALETTE.length],total:cum};}).sort((a,b)=>b.total-a.total);
+    return {kind:"lines",unit:"pts",sub:`Stableford ${useNet?"net":"brut"} cumulé`,series};
+  }
+
+  // 5) SKINS → skins cumulés par joueur (report inclus)
+  if(f==="skins"){
+    const cum={};ps.forEach(p=>cum[p.id]=0);let carry=0;
+    const acc={};ps.forEach(p=>acc[p.id]=[]);
+    validated.forEach(h=>{const vals=ps.map(p=>({id:p.id,s:netOf(p,h)})).filter(x=>x.s!=null);
+      if(vals.length){const min=Math.min(...vals.map(v=>v.s));const w=vals.filter(v=>v.s===min);
+        if(w.length===1){cum[w[0].id]+=1+carry;carry=0;}else carry++;}
+      ps.forEach(p=>acc[p.id].push({h,v:cum[p.id]}));});
+    const series=ps.map((p,idx)=>({name:dn(p),pts:acc[p.id],color:EVO_PALETTE[idx%EVO_PALETTE.length],
+      total:cum[p.id]})).sort((a,b)=>b.total-a.total);
+    return {kind:"lines",unit:"skins",sub:"Skins cumulés (report inclus)",series};
+  }
+
+  // 6) 1v1v1 / stroke net / autres → score net cumulé vs par (plus bas = mieux)
+  const series=ps.map((p,idx)=>{let cum=0;const pts=[];
+    validated.forEach(h=>{const s=netOf(p,h);if(s!=null)cum+=(s-pars[h]);pts.push({h,v:cum});});
+    return {name:dn(p),pts,color:EVO_PALETTE[idx%EVO_PALETTE.length],total:cum};}).sort((a,b)=>a.total-b.total);
+  return {kind:"lines",unit:"vs par",lowerBetter:true,sub:"Score net cumulé vs par (plus bas = mieux)",series};
+}
+function EvolutionChart({sg,ps,course,net}){
+  const data=confrontationSeries(sg,ps,course,net);
+  const hasData=(sg.validated||[]).length>0 && data;
+  const W=320,H=132,padL=8,padR=10,padT=12,padB=20;
   const plotW=W-padL-padR, plotH=H-padT-padB;
-  const X=h=>padL+(h/17)*plotW, Y=v=>padT+plotH-(v/maxV)*plotH;
-  return (
+  const X=h=>padL+(h/17)*plotW;
+  const Shell=({children,sub})=>(
     <div style={{marginTop:12,background:`linear-gradient(180deg,${T.panel2},${T.panel})`,
       borderRadius:12,padding:12,border:`1px solid ${T.line}`}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:8}}>
         <span style={{fontFamily:"Anton",fontSize:14,letterSpacing:.5}}>📈 ÉVOLUTION</span>
-        <span style={{fontSize:10,color:T.dim}}>Stableford {useNet?"net":"brut"} cumulé</span></div>
-      {!hasData && <div style={{fontSize:12,color:T.dim,textAlign:"center",padding:"8px 0"}}>
-        Valide des trous (bouton ✓) pour voir la courbe se tracer…</div>}
-      {hasData && <svg viewBox={`0 0 ${W} ${H}`} style={{width:"100%",height:"auto",display:"block"}}>
-        {/* repère mi-parcours (Aller | Retour) */}
-        <line x1={X(8.5)} y1={padT} x2={X(8.5)} y2={padT+plotH} stroke={T.line} strokeDasharray="3 3"/>
-        {/* lignes de chaque joueur */}
-        {series.map(s=>(<g key={s.p.id}>
-          <polyline fill="none" stroke={s.color} strokeWidth="2" strokeLinejoin="round"
-            strokeLinecap="round" points={s.pts.map(pt=>`${X(pt.h)},${Y(pt.v)}`).join(" ")}/>
-          {s.pts.length>0 && <circle cx={X(s.pts[s.pts.length-1].h)} cy={Y(s.total)} r="3" fill={s.color}/>}
-        </g>))}
-        {/* repères trous 1 / 9 / 18 */}
-        {[0,8,17].map(h=>(<text key={h} x={X(h)} y={H-6} fill={T.dim} fontSize="9"
-          textAnchor={h===0?"start":h===17?"end":"middle"}>{h+1}</text>))}
-      </svg>}
-      {hasData && <div style={{display:"flex",flexWrap:"wrap",gap:"4px 12px",marginTop:8}}>
-        {series.map(s=>(
-          <span key={s.p.id} style={{display:"flex",alignItems:"center",gap:5,fontSize:11}}>
-            <span style={{width:12,height:3,borderRadius:2,background:s.color}}/>
-            <span style={{color:T.text,fontWeight:700}}>{dispName(s.p)}</span>
-            <span style={{color:T.dim}}>{s.total}<span style={{fontSize:9}}> pts</span></span>
-          </span>))}
-      </div>}
+        <span style={{fontSize:10,color:T.dim}}>{sub}</span></div>
+      {children}
+    </div>);
+  if(!hasData) return <Shell sub="confrontation"><div style={{fontSize:12,color:T.dim,
+    textAlign:"center",padding:"8px 0"}}>Valide des trous (bouton ✓) pour voir la courbe se tracer…</div></Shell>;
+  const xTicks=<>{[0,8,17].map(h=>(<text key={h} x={X(h)} y={H-6} fill={T.dim} fontSize="9"
+    textAnchor={h===0?"start":h===17?"end":"middle"}>{h+1}</text>))}</>;
+  const turn=<line x1={X(8.5)} y1={padT} x2={X(8.5)} y2={padT+plotH} stroke={T.line} strokeDasharray="3 3"/>;
+
+  // ----- COURBE DE MARGE (match play) : 0 = All Square au centre -----
+  if(data.kind==="margin"){
+    const line=data.line;
+    const cur=line.length?line[line.length-1].v:0;
+    const maxAbs=Math.max(1,...line.map(p=>Math.abs(p.v)));
+    const mid=padT+plotH/2, Y=v=>mid-(v/maxAbs)*(plotH/2-4);
+    const status=cur>0?`${cur} UP · ${data.labelA}`:cur<0?`${-cur} UP · ${data.labelB}`:"All Square";
+    const col=cur>0?T.eu:cur<0?T.us:T.dim;
+    return <Shell sub={data.sub}>
+      <svg viewBox={`0 0 ${W} ${H}`} style={{width:"100%",height:"auto",display:"block"}}>
+        {turn}
+        <line x1={padL} y1={mid} x2={W-padR} y2={mid} stroke={T.dim} strokeOpacity=".5" strokeDasharray="2 3"/>
+        <text x={padL} y={padT+6} fill={T.eu} fontSize="8" opacity=".8">▲ {data.labelA}</text>
+        <text x={padL} y={padT+plotH-1} fill={T.us} fontSize="8" opacity=".8">▼ {data.labelB}</text>
+        <polyline fill="none" stroke={col} strokeWidth="2.2" strokeLinejoin="round" strokeLinecap="round"
+          points={line.map(p=>`${X(p.h)},${Y(p.v)}`).join(" ")}/>
+        {line.length>0 && <circle cx={X(line[line.length-1].h)} cy={Y(cur)} r="3.2" fill={col}/>}
+        {xTicks}
+      </svg>
+      <div style={{textAlign:"center",marginTop:6,fontFamily:"Anton",fontSize:15,color:col}}>{status}</div>
+    </Shell>;
+  }
+
+  // ----- COURBES À LIGNES (points cumulés / vs par) -----
+  const series=data.series;
+  const allV=series.flatMap(s=>s.pts.map(p=>p.v)).concat([0]);
+  let vMax=Math.max(...allV), vMin=Math.min(...allV);
+  if(vMax===vMin) vMax+=1;
+  const Y=v=>padT+plotH-((v-vMin)/(vMax-vMin))*plotH;
+  const showZero=vMin<0&&vMax>0;
+  return <Shell sub={data.sub}>
+    <svg viewBox={`0 0 ${W} ${H}`} style={{width:"100%",height:"auto",display:"block"}}>
+      {turn}
+      {showZero && <line x1={padL} y1={Y(0)} x2={W-padR} y2={Y(0)} stroke={T.dim} strokeOpacity=".4" strokeDasharray="2 3"/>}
+      {series.map((s,i)=>(<g key={i}>
+        <polyline fill="none" stroke={s.color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round"
+          points={s.pts.map(p=>`${X(p.h)},${Y(p.v)}`).join(" ")}/>
+        {s.pts.length>0 && <circle cx={X(s.pts[s.pts.length-1].h)} cy={Y(s.pts[s.pts.length-1].v)} r="3" fill={s.color}/>}
+      </g>))}
+      {xTicks}
+    </svg>
+    <div style={{display:"flex",flexWrap:"wrap",gap:"4px 12px",marginTop:8}}>
+      {series.map((s,i)=>(
+        <span key={i} style={{display:"flex",alignItems:"center",gap:5,fontSize:11}}>
+          <span style={{width:12,height:3,borderRadius:2,background:s.color}}/>
+          <span style={{color:T.text,fontWeight:700}}>{s.name}</span>
+          <span style={{color:T.dim}}>{data.lowerBetter&&s.total>0?"+":""}{s.total}<span style={{fontSize:9}}> {data.unit}</span></span>
+        </span>))}
     </div>
-  );
+  </Shell>;
 }
 function LiveBoard({sg,ps,course,net,result}){
   const validated=(sg.validated||[]).slice().sort((a,b)=>a-b);
