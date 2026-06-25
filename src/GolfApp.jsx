@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, deleteGameByDataId, dedupeGamesC
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.52 · repère orthonormé"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.53 · Passe Partout en tête"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -575,7 +575,11 @@ function WhoAreYou({members,loaded,cloud,onPick,setMembers}){
   const list=members.filter(realName).sort((a,b)=>dispName(a).localeCompare(dispName(b)));
   // Membres G&A = les joueurs préchargés (toujours en haut) ; les autres en dessous.
   const isMember=p=>p.member===true||/^seed-/.test(String(p.id));
-  const founders=list.filter(isMember), others=list.filter(p=>!isMember(p));
+  // « Passe Partout » épinglé tout en haut (l'organisateur se connecte 50× / jour) ;
+  // les autres membres restent par ordre alphabétique (tri stable).
+  const pinTop=p=>/passe.?partout/i.test(dispName(p));
+  const founders=[...list.filter(isMember)].sort((a,b)=>(pinTop(a)===pinTop(b))?0:pinTop(a)?-1:1);
+  const others=list.filter(p=>!isMember(p));
   const playerBtn=p=>(
     <button key={p.id} onClick={()=>choose(p)} style={{display:"flex",alignItems:"center",
       gap:12,padding:"14px 16px",borderRadius:14,border:`1.5px solid ${T.line}`,
