@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, deleteGameByDataId, dedupeGamesC
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.54 · Suivi score"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.55 · parties test + filtre"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -951,7 +951,7 @@ function Home({setTab,staleCount,refreshStale,openGame}){
 
       <Section>Raccourcis</Section>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
-        <Tile color={T.accent} icon="🏌️" title="Mes parties"
+        <Tile color={T.accent} icon="🏌️" title="Parties"
           sub={`${ongoing.length} en cours · ${done.length} terminées`}
           onClick={()=>setTab("history")}/>
         <Tile color={T.gold} icon="🏅" title="Classement"
@@ -1043,7 +1043,9 @@ function NewGame({setTab}){
   const [subtype,setSubtype]=useState("simple"); // tournoi : 'simple' | 'ryder' | 'coupe'
   const [coupeFormula,setCoupeFormula]=useState("matchplay"); // format des duels d'une coupe
   const [name,setName]=useState("");
-  const [courseId,setCourseId]=useState(undefined); // champ parcours VIDE au départ (à choisir)
+  // Parcours par défaut = Nans (parcours « maison ») ; on pourra le remplacer d'un clic.
+  const [courseId,setCourseId]=useState(()=>courses.find(c=>/Nans/i.test(c.name||""))?.id);
+  const [isTest,setIsTest]=useState(false); // partie de TEST → exclue du classement
   const [mode,setMode]=useState("net");
   const [hcpRelative,setHcpRelative]=useState(false); // coups rendus différentiel (match play)
   const [selected,setSelected]=useState([]);
@@ -1134,14 +1136,14 @@ function NewGame({setTab}){
     if(type==="simple"){
       const ids=roster.map(p=>p.id);
       const subgames=[{id:1,formula,players:ids,scores:{},validated:[],done:false,hcpRelative}];
-      const game={id:Date.now(),name:finalName(),type,courseId,mode,roster,subgames,
+      const game={id:Date.now(),name:finalName(),type,courseId,mode,roster,subgames,test:isTest,
         hcpRelative,teamNames:team2v2?["Équipe 1","Équipe 2"]:null,done:false,created:Date.now()};
       setGames([game,...games]);setTab("history");return;
     }
     if(subtype==="coupe"){
       if(!courseId) return alert("Choisis d'abord un parcours.");
       // bracket vide : le tirage du tour 1 se lance dans le détail
-      const game={id:Date.now(),name:finalName(),type:"event",subtype:"coupe",mode,courseId,
+      const game={id:Date.now(),name:finalName(),type:"event",subtype:"coupe",mode,courseId,test:isTest,
         coupeFormula,roster,rounds:[],hcpRelative,teamNames:null,done:false,created:Date.now()};
       setGames([game,...games]);setTab("history");return;
     }
@@ -1156,7 +1158,7 @@ function NewGame({setTab}){
       return {id:ri+1,courseId:r.courseId,courseName:c?.name||"Parcours",
         subgames,done:false};
     });
-    const game={id:Date.now(),name:finalName(),type,subtype,mode,roster,rounds:tRounds,
+    const game={id:Date.now(),name:finalName(),type,subtype,mode,roster,rounds:tRounds,test:isTest,
       hcpRelative,teamNames:["Équipe 1","Équipe 2"],done:false,created:Date.now()};
     setGames([game,...games]);setTab("history");
   };
@@ -1382,6 +1384,14 @@ function NewGame({setTab}){
         {decompteUI}
       </>)}
 
+      <label style={{...card(isTest?T.gold:T.line),display:"flex",alignItems:"center",gap:10,
+        marginTop:14,cursor:"pointer"}}>
+        <input type="checkbox" checked={isTest} onChange={e=>setIsTest(e.target.checked)}
+          style={{width:18,height:18,accentColor:T.gold}}/>
+        <span style={{fontSize:13}}><b style={{color:isTest?T.gold:T.text}}>🧪 Partie de test</b>
+          <span style={{color:T.dim}}> — ne sera pas comptabilisée au classement</span></span>
+      </label>
+
       <button onClick={create} style={{...addBtn,fontFamily:"'Archivo',sans-serif",fontSize:17,
         letterSpacing:.5,marginTop:16}}>▶ CRÉER & DÉMARRER</button>
     </div>
@@ -1402,10 +1412,14 @@ function EventSplit({split,setSplit}){
 /* ===== Autocomplétion parcours (API live, repli manuel) ===== */
 function CourseAutocomplete({courses,setCourses,courseId,setCourseId}){
   const sel=courses.find(c=>c.id===courseId);
-  const [q,setQ]=useState(sel?.name||"");
+  const [q,setQ]=useState("");
+  const [focused,setFocused]=useState(false);
   const [sugg,setSugg]=useState([]);
   const [open,setOpen]=useState(false);
   const [status,setStatus]=useState("");
+  // Affichage : hors focus on montre le parcours choisi (ex. Nans par défaut) ; au clic le
+  // champ se vide pour taper directement, sans avoir à effacer les lettres une par une.
+  const display=focused?q:(sel?.name||q);
 
   // recherche : d'abord parcours déjà enregistrés, puis API
   useEffect(()=>{
@@ -1446,7 +1460,9 @@ function CourseAutocomplete({courses,setCourses,courseId,setCourseId}){
   return (
     <div style={{position:"relative"}}>
       <Field label="Parcours (tape pour rechercher)">
-        <input value={q} onFocusCapture={()=>setOpen(true)}
+        <input value={display}
+          onFocus={()=>{setFocused(true);setQ("");setOpen(true);}}
+          onBlur={()=>setTimeout(()=>{setFocused(false);setOpen(false);},150)}
           onChange={e=>{setQ(e.target.value);setOpen(true);}}
           placeholder="Tape le nom du parcours…" style={inp}/></Field>
       {status && <div style={{fontSize:11,color:T.gold,marginTop:4}}>{status}</div>}
@@ -1517,6 +1533,7 @@ function computeStandings(done, courses){
   const isMember=p=>p?.member===true || /^seed-/.test(String(p?.id));
   const counts=ps=>ps.filter(isMember).length>=2;
   done.forEach(g=>{
+    if(g.test) return;           // partie de TEST → jamais comptabilisée au classement
     if(!gameComplete(g)) return; // partie non disputée / 18 trous non remplis → 0 point
     const net=g.mode==="net";
     const subs=g.rounds
@@ -1603,7 +1620,7 @@ function seasonImpact(g, games, courses){
   }).sort((x,y)=>(x.rank||99)-(y.rank||99)); // ordre du classement général
   // la partie compte-t-elle au classement ? (≥2 membres dans au moins une confrontation)
   const subs=g.rounds?g.rounds.flatMap(r=>r.subgames||[]):(g.subgames||[]);
-  const counted=gameComplete(g) && subs.some(sg=>(sg.players||[]).map(id=>(g.roster||[]).find(p=>p.id===id))
+  const counted=!g.test && gameComplete(g) && subs.some(sg=>(sg.players||[]).map(id=>(g.roster||[]).find(p=>p.id===id))
     .filter(Boolean).filter(isMember).length>=2);
   return {lines,counted};
 }
@@ -2035,10 +2052,54 @@ function HoleEditor({c,upd}){
   );
 }
 
+// Génère 5 parties de TEST déjà jouées (18 trous), variété de scores demandée :
+// par, birdie, EAGLE, bogey, double et triple. Marquées test:true → hors classement.
+function makeTestGames(members,courses){
+  const co=courses.find(c=>/Nans/i.test(c.name||""))||courses[0];
+  const cid=co?.id;
+  const pars=(co?.pars&&co.pars.length===18)?co.pars:new Array(18).fill(4);
+  const pool=members.filter(m=>m.member===true||/^seed-/.test(String(m.id))).slice(0,4)
+    .map((m,i)=>({id:m.id,name:m.name,nick:m.nick||"",member:true,tee:"Jaune",
+      index:(m.index&&m.index>0)?m.index:[12,18,24,8][i%4]}));
+  if(pool.length<4) return []; // il faut au moins 4 joueurs préchargés
+  // écarts au par sur 18 trous : 0 par · -1 birdie · -2 EAGLE · +1 bogey · +2 double · +3 triple
+  const DELTAS=[0,-1,0,1,-1,0,2,-2,0,1,-1,3,0,1,2,-1,0,1];
+  const scoreFor=(parH,pi,gi,h)=>Math.max(1,parH+DELTAS[(h+pi*3+gi*5)%18]);
+  const buildScores=(ids,gi)=>{const s={};ids.forEach((id,pi)=>{s[id]={};
+    for(let h=0;h<18;h++)s[id][h]=scoreFor(pars[h],pi,gi,h);});return s;};
+  const P=pool.map(p=>p.id);
+  const t=Date.now();
+  const mk=(gi,formula,nIds,mode,team)=>{
+    const ids=P.slice(0,nIds);
+    const roster=pool.slice(0,nIds).map((p,i)=>({...p,
+      team:team?(i<nIds/2?0:1):undefined}));
+    return {id:t+gi,name:`🧪 TEST ${FORMULA_SHORT[formula]||formula}`,type:"simple",
+      courseId:cid,mode,roster,test:true,done:true,created:t+gi,
+      teamNames:team?["Équipe 1","Équipe 2"]:null,
+      subgames:[{id:1,formula,players:ids,scores:buildScores(ids,gi),
+        validated:Array.from({length:18},(_,i)=>i),done:true,hcpRelative:false}]};
+  };
+  return [
+    mk(1,"matchplay",2,"net",false),
+    mk(2,"chouette",3,"net",false),
+    mk(3,"stableford",4,"net",false),
+    mk(4,"fourball",4,"net",true),
+    mk(5,"mexicaine",4,"gross",true),
+  ];
+}
 function History({openId,onConsumeOpen}){
-  const {games,setGames,members,courses,removeGame,admin,cloud,cleanupDuplicates,clearAllGames}=useContext(Ctx);
+  const {user,games,setGames,members,courses,removeGame,admin,cloud,cleanupDuplicates,clearAllGames}=useContext(Ctx);
   const [open,setOpen]=useState(openId||null);
+  const [scope,setScope]=useState("mine"); // "mine" = mes parties · "all" = toutes
   const [cleaning,setCleaning]=useState("");
+  const mine=g=>(g.roster||[]).some(p=>String(p.id)===String(user?.id));
+  const shown=scope==="mine"?games.filter(mine):games;
+  const loadDemos=()=>{
+    const demos=makeTestGames(members,courses);
+    if(!demos.length) return alert("Il faut au moins 4 joueurs préchargés pour générer les parties de test.");
+    if(!confirm("Charger 5 parties de TEST (match play, chouette, stableford, fourball, mexicaine) déjà jouées ?\nElles sont marquées 🧪 TEST et ne comptent pas au classement.")) return;
+    setGames([...demos,...games]); setScope("all");
+  };
   const doCleanup=async()=>{ setCleaning("…");
     const n=await cleanupDuplicates();
     setCleaning(n>0?`✅ ${n} doublon(s) supprimé(s)`:"✅ Aucun doublon");
@@ -2052,28 +2113,40 @@ function History({openId,onConsumeOpen}){
   const delGame=(id,e)=>{e.stopPropagation();
     const g=games.find(x=>x.id===id); if(!g) return;
     // une partie VALIDÉE contenant des membres = protégée : seul l'organisateur peut la supprimer
-    if(g.done && (g.roster||[]).some(isMember) && !admin){
+    // (les parties de test ne sont pas protégées : elles ne comptent pas au classement)
+    if(g.done && !g.test && (g.roster||[]).some(isMember) && !admin){
       alert("🔒 Cette partie validée fait partie du championnat : seul l'organisateur peut la supprimer.");
       return;}
     if(confirm("Supprimer définitivement cette partie de l'historique ?")) removeGame(g);};
-  if(!games.length) return <Empty text="Aucune partie. Crée-en une depuis l'accueil."/>;
   if(open){const g=games.find(x=>x.id===open);
     if(g) return <GameDetail g={g} members={members} courses={courses} games={games}
       setGames={setGames} back={()=>setOpen(null)}/>;}
-  return (<div><Section>Historique ({games.length})</Section>
+  return (<div><Section>Parties ({shown.length})</Section>
+    {/* sélecteur slide : mes parties / toutes */}
+    <div style={{display:"flex",background:T.panel,borderRadius:999,padding:3,marginBottom:10}}>
+      {[["mine","🏌️ Mes parties"],["all","🌍 Toutes"]].map(([k,lab])=>(
+        <button key={k} onClick={()=>setScope(k)} style={{flex:1,padding:"9px 6px",borderRadius:999,
+          border:"none",cursor:"pointer",fontWeight:800,fontSize:12,transition:"all .15s",
+          background:scope===k?T.accent:"transparent",color:scope===k?T.ink:T.dim}}>{lab}</button>))}
+    </div>
     {admin&&<div style={{marginBottom:10,display:"flex",flexDirection:"column",gap:6}}>
+      <button onClick={loadDemos} style={{...delBtn,width:"100%",fontSize:12,
+        borderColor:T.violet,color:T.violet}}>🧪 Charger 5 parties de test (hors classement)</button>
       {cloud&&<button onClick={doCleanup} style={{...delBtn,width:"100%",fontSize:12,
         borderColor:T.gold,color:T.gold}}>🧹 Nettoyer les doublons (réparer le classement)</button>}
       {cleaning&&<div style={{fontSize:11,color:T.accent,textAlign:"center"}}>{cleaning}</div>}
       <button onClick={doClearAll} style={{...delBtn,width:"100%",fontSize:12,
         borderColor:T.us,color:T.us}}>🗑️ Tout supprimer · repartir à zéro (test → vraie saison)</button>
     </div>}
-    {games.map(g=>(<div key={g.id} onClick={()=>setOpen(g.id)}
-      style={{...card(g.done?T.accent:T.gold),cursor:"pointer",
+    {!shown.length && <Empty text={scope==="mine"?"Aucune partie à ton nom. Bascule sur « Toutes » ou crée-en une.":"Aucune partie. Crée-en une depuis l'accueil."}/>}
+    {shown.map(g=>(<div key={g.id} onClick={()=>setOpen(g.id)}
+      style={{...card(g.test?T.violet:g.done?T.accent:T.gold),cursor:"pointer",
         display:"flex",alignItems:"center",gap:8}}>
       <div style={{flex:1,minWidth:0}}>
         <div style={{fontWeight:800,whiteSpace:"nowrap",overflow:"hidden",
-          textOverflow:"ellipsis"}}>{g.name}</div>
+          textOverflow:"ellipsis"}}>
+          {g.test&&<span style={{fontSize:9,fontWeight:800,color:T.violet,border:`1px solid ${T.violet}`,
+            borderRadius:6,padding:"1px 5px",marginRight:6}}>TEST</span>}{g.name}</div>
         <div style={{fontSize:11,color:T.dim,whiteSpace:"nowrap",overflow:"hidden",
           textOverflow:"ellipsis"}}>
           {g.type==="event"?(g.subtype==="ryder"?"🏆 Ryder Cup":g.subtype==="coupe"?"🥊 MiniCup":"🏅 MiniChamp"):"⛳ Partie amicale"}
