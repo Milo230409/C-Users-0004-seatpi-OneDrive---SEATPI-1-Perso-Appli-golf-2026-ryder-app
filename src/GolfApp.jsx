@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, deleteGameByDataId, dedupeGamesC
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.51 · match play lisible"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.52 · repère orthonormé"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -2892,9 +2892,8 @@ function confrontationSeries(sg,ps,course,net){
 function EvolutionChart({sg,ps,course,net}){
   const data=confrontationSeries(sg,ps,course,net);
   const hasData=(sg.validated||[]).length>0 && data;
-  const W=320,H=132,padL=8,padR=10,padT=12,padB=20;
-  const plotW=W-padL-padR, plotH=H-padT-padB;
-  const X=h=>padL+(h/17)*plotW;
+  const W=320,H=132,padL=8,padT=12,padB=20;
+  const plotH=H-padT-padB;
   const Shell=({children,sub})=>(
     <div style={{marginTop:12,background:`linear-gradient(180deg,${T.panel2},${T.panel})`,
       borderRadius:12,padding:12,border:`1px solid ${T.line}`}}>
@@ -2905,9 +2904,6 @@ function EvolutionChart({sg,ps,course,net}){
     </div>);
   if(!hasData) return <Shell sub="confrontation"><div style={{fontSize:12,color:T.dim,
     textAlign:"center",padding:"8px 0"}}>Valide des trous (bouton ✓) pour voir la courbe se tracer…</div></Shell>;
-  const xTicks=<>{[0,8,17].map(h=>(<text key={h} x={X(h)} y={H-6} fill={T.dim} fontSize="9"
-    textAnchor={h===0?"start":h===17?"end":"middle"}>{h+1}</text>))}</>;
-  const turn=<line x1={X(8.5)} y1={padT} x2={X(8.5)} y2={padT+plotH} stroke={T.line} strokeDasharray="3 3"/>;
 
   // ----- COURBE DE MARGE (match play) : 0 = All Square au centre -----
   if(data.kind==="margin"){
@@ -2950,23 +2946,42 @@ function EvolutionChart({sg,ps,course,net}){
     </Shell>;
   }
 
-  // ----- COURBES À LIGNES (points cumulés / vs par) -----
+  // ----- COURBES À LIGNES (points/vs par) : repère orthonormé, abscisse = trous 1→18 -----
   const series=data.series;
   const allV=series.flatMap(s=>s.pts.map(p=>p.v)).concat([0]);
   let vMax=Math.max(...allV), vMin=Math.min(...allV);
   if(vMax===vMin) vMax+=1;
+  const LP=22, RP=12;                              // marges axes Y / fin de courbe
+  const Xl=h=>LP+(h/17)*(W-LP-RP);
   const Y=v=>padT+plotH-((v-vMin)/(vMax-vMin))*plotH;
   const showZero=vMin<0&&vMax>0;
+  const xs=series.find(s=>s.pts.length)?.pts||[];
+  const lastH=xs.length?xs[xs.length-1].h:null;     // dernier trou validé
+  const x0=padT+plotH;                              // y de l'axe des abscisses
   return <Shell sub={data.sub}>
     <svg viewBox={`0 0 ${W} ${H}`} style={{width:"100%",height:"auto",display:"block"}}>
-      {turn}
-      {showZero && <line x1={padL} y1={Y(0)} x2={W-padR} y2={Y(0)} stroke={T.dim} strokeOpacity=".4" strokeDasharray="2 3"/>}
+      {/* repère orthonormé : axe Y (gauche) + axe X (bas) */}
+      <line x1={LP} y1={padT} x2={LP} y2={x0} stroke={T.line}/>
+      <line x1={LP} y1={x0} x2={W-RP} y2={x0} stroke={T.line}/>
+      {/* graduations Y : max / 0 / min */}
+      <text x={LP-3} y={padT+4} fill={T.dim} fontSize="8" textAnchor="end">{Math.round(vMax)}</text>
+      <text x={LP-3} y={x0} fill={T.dim} fontSize="8" textAnchor="end">{Math.round(vMin)}</text>
+      {showZero && <><line x1={LP} y1={Y(0)} x2={W-RP} y2={Y(0)} stroke={T.dim} strokeOpacity=".4" strokeDasharray="2 3"/>
+        <text x={LP-3} y={Y(0)+3} fill={T.dim} fontSize="8" textAnchor="end">0</text></>}
+      {/* repère mi-parcours (trou 9) + marqueur du dernier trou validé */}
+      <line x1={Xl(8.5)} y1={padT} x2={Xl(8.5)} y2={x0} stroke={T.line} strokeOpacity=".5" strokeDasharray="3 3"/>
+      {lastH!=null && <line x1={Xl(lastH)} y1={padT} x2={Xl(lastH)} y2={x0} stroke={T.accent} strokeOpacity=".45" strokeDasharray="2 2"/>}
+      {/* courbes */}
       {series.map((s,i)=>(<g key={i}>
         <polyline fill="none" stroke={s.color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round"
-          points={s.pts.map(p=>`${X(p.h)},${Y(p.v)}`).join(" ")}/>
-        {s.pts.length>0 && <circle cx={X(s.pts[s.pts.length-1].h)} cy={Y(s.pts[s.pts.length-1].v)} r="3" fill={s.color}/>}
+          points={s.pts.map(p=>`${Xl(p.h)},${Y(p.v)}`).join(" ")}/>
+        {s.pts.length>0 && <circle cx={Xl(s.pts[s.pts.length-1].h)} cy={Y(s.pts[s.pts.length-1].v)} r="3" fill={s.color}/>}
       </g>))}
-      {xTicks}
+      {/* abscisse : trou 1, dernier trou validé (surbrillance), trou 18 */}
+      <text x={Xl(0)} y={H-6} fill={T.dim} fontSize="9" textAnchor="start">1</text>
+      <text x={Xl(17)} y={H-6} fill={T.dim} fontSize="9" textAnchor="end">18</text>
+      {lastH!=null && lastH>1 && lastH<16 &&
+        <text x={Xl(lastH)} y={H-6} fill={T.accent} fontSize="9" fontWeight="800" textAnchor="middle">{lastH+1}</text>}
     </svg>
     <div style={{display:"flex",flexWrap:"wrap",gap:"4px 12px",marginTop:8}}>
       {series.map((s,i)=>(
