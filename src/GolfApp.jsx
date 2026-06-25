@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, deleteGameByDataId, dedupeGamesC
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.47 · 2v2 membres"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.48 · 18 trous requis"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -1471,6 +1471,36 @@ function CourseAutocomplete({courses,setCourses,courseId,setCourseId}){
 /* ===== CHAMPIONNAT : points 2/1/0 par joueur, cumulé + moyenne + confrontations ===== */
 // Classement de saison à partir des parties terminées → {S:id->{pts,played,win,draw,loss}, H}.
 // Réutilisé pour le championnat ET le résumé de fin de partie.
+// Une manche (sous-partie) n'est COMPLÈTE que si les 18 trous sont remplis pour TOUS
+// ses joueurs. Une manche à moins de 2 joueurs (bye de coupe) n'est pas une vraie manche.
+function subComplete(sg){
+  const ps=sg?.players||[];
+  if(ps.length<2) return false; // bye / manche vide : pas une vraie confrontation
+  for(const pid of ps){
+    const sc=sg.scores?.[pid];
+    if(!sc) return false;
+    for(let h=0;h<18;h++){ if(sc[h]==null) return false; }
+  }
+  return true;
+}
+// Une partie/compétition n'est COMPLÈTE (et donc comptabilisée au classement) que s'il
+// existe au moins une vraie manche et que TOUTES les vraies manches ont leurs 18 trous
+// remplis pour tous les joueurs. → tant qu'une compétition n'est pas réellement jouée,
+// elle ne rapporte aucun point (ex. une Ryder Cup créée mais pas encore disputée).
+function gameComplete(g){
+  const subs=g.rounds?g.rounds.flatMap(r=>r.subgames||[]):(g.subgames||[]);
+  const real=subs.filter(s=>(s.players||[]).length>=2);
+  if(!real.length) return false;
+  return real.every(subComplete);
+}
+// Liste des manches non terminées (pour expliquer pourquoi on ne peut pas valider).
+function incompleteSubs(g){
+  const subs=g.rounds
+    ? g.rounds.flatMap((r,ri)=>r.subgames.map((sg,si)=>({sg,label:`Manche ${ri+1}-${si+1}`})))
+    : (g.subgames||[]).map((sg,si)=>({sg,label:g.subgames.length>1?`Partie ${si+1}`:"La partie"}));
+  return subs.filter(({sg})=>(sg.players||[]).length>=2 && !subComplete(sg)).map(x=>x.label);
+}
+
 function computeStandings(done, courses){
   const S={}, H={}, D={}; // D : id -> [{id,name,pts}] détail des points par partie
   const detail=(id,gid,name,pts)=>{(D[id]=D[id]||[]).push({id:gid,name,pts});};
@@ -1483,6 +1513,7 @@ function computeStandings(done, courses){
   const isMember=p=>p?.member===true || /^seed-/.test(String(p?.id));
   const counts=ps=>ps.filter(isMember).length>=2;
   done.forEach(g=>{
+    if(!gameComplete(g)) return; // partie non disputée / 18 trous non remplis → 0 point
     const net=g.mode==="net";
     const subs=g.rounds
       ? g.rounds.flatMap(r=>r.subgames.map(sg=>({sg,course:courses.find(c=>c.id===r.courseId)})))
@@ -1568,7 +1599,7 @@ function seasonImpact(g, games, courses){
   }).sort((x,y)=>(x.rank||99)-(y.rank||99)); // ordre du classement général
   // la partie compte-t-elle au classement ? (≥2 membres dans au moins une confrontation)
   const subs=g.rounds?g.rounds.flatMap(r=>r.subgames||[]):(g.subgames||[]);
-  const counted=subs.some(sg=>(sg.players||[]).map(id=>(g.roster||[]).find(p=>p.id===id))
+  const counted=gameComplete(g) && subs.some(sg=>(sg.players||[]).map(id=>(g.roster||[]).find(p=>p.id===id))
     .filter(Boolean).filter(isMember).length>=2);
   return {lines,counted};
 }
@@ -2132,6 +2163,13 @@ function GameDetail({g,members,courses,games,setGames,back}){
       return {...sg,validated:v.includes(hole)?v.filter(x=>x!==hole):[...v,hole]};})};})});
   const toggleDone=()=>{
     const nd=!g.done;
+    if(nd && !gameComplete(g)){ // on ne valide QUE si les 18 trous sont remplis pour tous
+      const miss=incompleteSubs(g);
+      alert("Impossible de valider : les 18 trous doivent être remplis pour tous les joueurs.\n\n"
+        +(miss.length?("À terminer : "+miss.join(", ")):"Aucune manche n'est encore complète.")
+        +"\n\nTant qu'une partie n'est pas terminée, elle ne compte pas au classement.");
+      return;
+    }
     if(isTournament) save({...g,done:nd,
       rounds:g.rounds.map(r=>({...r,done:nd,subgames:r.subgames.map(s=>({...s,done:nd}))}))});
     else save({...g,done:nd,subgames:g.subgames.map(s=>({...s,done:nd}))});
