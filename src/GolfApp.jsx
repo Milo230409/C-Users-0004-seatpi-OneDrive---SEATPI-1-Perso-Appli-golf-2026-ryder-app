@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, deleteGameByDataId, dedupeGamesC
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.53 · Passe Partout en tête"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.54 · Suivi score"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -2191,7 +2191,7 @@ function GameDetail({g,members,courses,games,setGames,back}){
       <div style={{display:"flex",gap:8,marginBottom:12}}>
         <Pill active={view==="briefing"} onClick={()=>setView("briefing")}>📋 Briefing</Pill>
         <Pill active={view==="score"} onClick={()=>setView("score")}>✏️ Scores</Pill>
-        <Pill active={view==="evo"} onClick={()=>setView("evo")}>📈 Évolution</Pill>
+        <Pill active={view==="evo"} onClick={()=>setView("evo")}>📈 Suivi score</Pill>
       </div>
 
       {view==="briefing" && <Briefing g={g} course={refCourse} playerById={playerById}
@@ -2902,7 +2902,7 @@ function EvolutionChart({sg,ps,course,net}){
     <div style={{marginTop:12,background:`linear-gradient(180deg,${T.panel2},${T.panel})`,
       borderRadius:12,padding:12,border:`1px solid ${T.line}`}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:8}}>
-        <span style={{fontFamily:"Anton",fontSize:14,letterSpacing:.5}}>📈 ÉVOLUTION</span>
+        <span style={{fontFamily:"Anton",fontSize:14,letterSpacing:.5}}>📈 SUIVI SCORE</span>
         <span style={{fontSize:10,color:T.dim}}>{sub}</span></div>
       {children}
     </div>);
@@ -2952,9 +2952,11 @@ function EvolutionChart({sg,ps,course,net}){
 
   // ----- COURBES À LIGNES (points/vs par) : repère orthonormé, abscisse = trous 1→18 -----
   const series=data.series;
-  const allV=series.flatMap(s=>s.pts.map(p=>p.v)).concat([0]);
-  let vMax=Math.max(...allV), vMin=Math.min(...allV);
-  if(vMax===vMin) vMax+=1;
+  // l'axe Y épouse les valeurs réelles (on NE force PAS le 0 en bas → la courbe ne
+  // « démarre » plus depuis 0, elle suit le score effectif).
+  const allV=series.flatMap(s=>s.pts.map(p=>p.v));
+  let vMax=allV.length?Math.max(...allV):1, vMin=allV.length?Math.min(...allV):0;
+  if(vMax===vMin){vMax+=1;vMin-=1;}
   const LP=22, RP=12;                              // marges axes Y / fin de courbe
   const Xl=h=>LP+(h/17)*(W-LP-RP);
   const Y=v=>padT+plotH-((v-vMin)/(vMax-vMin))*plotH;
