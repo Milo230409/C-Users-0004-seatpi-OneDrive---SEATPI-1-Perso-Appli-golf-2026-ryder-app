@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, deleteGameByDataId, dedupeGamesC
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.48 · 18 trous requis"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.49 · courbe évolution"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -2187,10 +2187,29 @@ function GameDetail({g,members,courses,games,setGames,back}){
       <div style={{display:"flex",gap:8,marginBottom:12}}>
         <Pill active={view==="briefing"} onClick={()=>setView("briefing")}>📋 Briefing</Pill>
         <Pill active={view==="score"} onClick={()=>setView("score")}>✏️ Scores</Pill>
+        <Pill active={view==="evo"} onClick={()=>setView("evo")}>📈 Évolution</Pill>
       </div>
 
       {view==="briefing" && <Briefing g={g} course={refCourse} playerById={playerById}
         onStart={()=>setView("score")}/>}
+
+      {view==="evo" && (()=>{
+        const blocks=isTournament
+          ? g.rounds.flatMap(r=>r.subgames.map(sg=>({sg,course:courses.find(c=>c.id===r.courseId),
+              label:`Manche ${r.id}${r.subgames.length>1?` · partie ${r.subgames.indexOf(sg)+1}`:""}`})))
+          : (g.subgames||[]).map((sg,i)=>({sg,course:refCourse,
+              label:g.subgames.length>1?`Partie ${i+1}`:null}));
+        const visible=blocks.filter(b=>(b.sg.players||[]).length>=2);
+        if(!visible.length) return <Empty text="Pas encore de manche à suivre."/>;
+        return <>
+          {visible.map(({sg,course,label})=>(
+            <div key={sg.id} style={{marginBottom:14}}>
+              {label&&<div style={{fontFamily:"Anton",fontSize:13,color:T.dim,marginBottom:2}}>{label}</div>}
+              <EvolutionChart sg={sg} ps={sg.players.map(playerById).filter(Boolean)}
+                course={course} net={g.mode==="net"}/>
+            </div>))}
+        </>;
+      })()}
 
       {view==="score" && (()=>{
         // n'afficher que la partie où je suis (sauf si terminé ou si je déplie tout).
@@ -2789,6 +2808,60 @@ function stablefordNet(sg,p,course,validated){
     const s=g-(strokes[h]||0),d=s-pars[h];
     pts+=d<=-2?4:d===-1?3:d===0?2:d===1?1:0;});
   return pts;
+}
+/* ===== Courbe d'évolution trou par trou (Stableford cumulé, "plus haut = mieux") ===== */
+const EVO_PALETTE=["#3ddc84","#4c8dff","#ffd24a","#ff7b9c","#a78bfa","#ff9f43","#2dd4bf","#f9a8d4"];
+function EvolutionChart({sg,ps,course,net}){
+  const validated=(sg.validated||[]).slice().sort((a,b)=>a-b);
+  const pars=holePars(course);
+  const useNet=net && !BRUT_ONLY.includes(sg.formula); // mexicaine = brut only
+  const series=ps.map((p,idx)=>{
+    const strokes=useNet?strokesPerHole(effChp(p,[p],course,false),course?.si||[]):new Array(18).fill(0);
+    let cum=0; const pts=[];
+    validated.forEach(h=>{
+      const g=sg.scores?.[p.id]?.[h];
+      if(g!=null){const s=g-(strokes[h]||0),d=s-pars[h];
+        cum+=d<=-2?4:d===-1?3:d===0?2:d===1?1:0;}
+      pts.push({h,v:cum});
+    });
+    return {p,pts,total:cum,color:EVO_PALETTE[idx%EVO_PALETTE.length]};
+  }).sort((a,b)=>b.total-a.total);
+  const hasData=validated.length>0;
+  const maxV=Math.max(4,...series.flatMap(s=>s.pts.map(pt=>pt.v)));
+  const W=320,H=132,padL=8,padR=8,padT=10,padB=20;
+  const plotW=W-padL-padR, plotH=H-padT-padB;
+  const X=h=>padL+(h/17)*plotW, Y=v=>padT+plotH-(v/maxV)*plotH;
+  return (
+    <div style={{marginTop:12,background:`linear-gradient(180deg,${T.panel2},${T.panel})`,
+      borderRadius:12,padding:12,border:`1px solid ${T.line}`}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:8}}>
+        <span style={{fontFamily:"Anton",fontSize:14,letterSpacing:.5}}>📈 ÉVOLUTION</span>
+        <span style={{fontSize:10,color:T.dim}}>Stableford {useNet?"net":"brut"} cumulé</span></div>
+      {!hasData && <div style={{fontSize:12,color:T.dim,textAlign:"center",padding:"8px 0"}}>
+        Valide des trous (bouton ✓) pour voir la courbe se tracer…</div>}
+      {hasData && <svg viewBox={`0 0 ${W} ${H}`} style={{width:"100%",height:"auto",display:"block"}}>
+        {/* repère mi-parcours (Aller | Retour) */}
+        <line x1={X(8.5)} y1={padT} x2={X(8.5)} y2={padT+plotH} stroke={T.line} strokeDasharray="3 3"/>
+        {/* lignes de chaque joueur */}
+        {series.map(s=>(<g key={s.p.id}>
+          <polyline fill="none" stroke={s.color} strokeWidth="2" strokeLinejoin="round"
+            strokeLinecap="round" points={s.pts.map(pt=>`${X(pt.h)},${Y(pt.v)}`).join(" ")}/>
+          {s.pts.length>0 && <circle cx={X(s.pts[s.pts.length-1].h)} cy={Y(s.total)} r="3" fill={s.color}/>}
+        </g>))}
+        {/* repères trous 1 / 9 / 18 */}
+        {[0,8,17].map(h=>(<text key={h} x={X(h)} y={H-6} fill={T.dim} fontSize="9"
+          textAnchor={h===0?"start":h===17?"end":"middle"}>{h+1}</text>))}
+      </svg>}
+      {hasData && <div style={{display:"flex",flexWrap:"wrap",gap:"4px 12px",marginTop:8}}>
+        {series.map(s=>(
+          <span key={s.p.id} style={{display:"flex",alignItems:"center",gap:5,fontSize:11}}>
+            <span style={{width:12,height:3,borderRadius:2,background:s.color}}/>
+            <span style={{color:T.text,fontWeight:700}}>{dispName(s.p)}</span>
+            <span style={{color:T.dim}}>{s.total}<span style={{fontSize:9}}> pts</span></span>
+          </span>))}
+      </div>}
+    </div>
+  );
 }
 function LiveBoard({sg,ps,course,net,result}){
   const validated=(sg.validated||[]).slice().sort((a,b)=>a-b);
