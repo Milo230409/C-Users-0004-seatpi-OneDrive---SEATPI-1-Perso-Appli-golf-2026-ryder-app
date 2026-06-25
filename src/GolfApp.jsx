@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, deleteGameByDataId, dedupeGamesC
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.50 · courbe confrontation"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.51 · match play lisible"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -2914,21 +2914,39 @@ function EvolutionChart({sg,ps,course,net}){
     const line=data.line;
     const cur=line.length?line[line.length-1].v:0;
     const maxAbs=Math.max(1,...line.map(p=>Math.abs(p.v)));
+    const RP=20;                                  // marge droite pour l'échelle UP
+    const Xm=h=>padL+(h/17)*(W-padL-RP);
     const mid=padT+plotH/2, Y=v=>mid-(v/maxAbs)*(plotH/2-4);
-    const status=cur>0?`${cur} UP · ${data.labelA}`:cur<0?`${-cur} UP · ${data.labelB}`:"All Square";
     const col=cur>0?T.eu:cur<0?T.us:T.dim;
-    return <Shell sub={data.sub}>
+    const status=cur>0?`${cur} UP · ${data.labelA}`:cur<0?`${-cur} UP · ${data.labelB}`:"All Square";
+    const levels=[];for(let i=1;i<=maxAbs;i++)levels.push(i);
+    return <Shell sub="Match play · trous d'avance (UP)">
+      {/* nom du joueur/équipe du HAUT, aligné à droite */}
+      <div style={{display:"flex",justifyContent:"flex-end",fontSize:11,fontWeight:800,color:T.eu}}>
+        ▲ {data.labelA}</div>
       <svg viewBox={`0 0 ${W} ${H}`} style={{width:"100%",height:"auto",display:"block"}}>
-        {turn}
-        <line x1={padL} y1={mid} x2={W-padR} y2={mid} stroke={T.dim} strokeOpacity=".5" strokeDasharray="2 3"/>
-        <text x={padL} y={padT+6} fill={T.eu} fontSize="8" opacity=".8">▲ {data.labelA}</text>
-        <text x={padL} y={padT+plotH-1} fill={T.us} fontSize="8" opacity=".8">▼ {data.labelB}</text>
+        <line x1={Xm(8.5)} y1={padT} x2={Xm(8.5)} y2={padT+plotH} stroke={T.line} strokeDasharray="3 3"/>
+        {/* échelle UP à droite (1, 2, 3…) de part et d'autre du 0 */}
+        {levels.map(i=>(<g key={i}>
+          <line x1={padL} y1={Y(i)} x2={W-RP} y2={Y(i)} stroke={T.line} strokeOpacity=".45"/>
+          <line x1={padL} y1={Y(-i)} x2={W-RP} y2={Y(-i)} stroke={T.line} strokeOpacity=".45"/>
+          <text x={W-RP+3} y={Y(i)+3} fill={T.dim} fontSize="8">{i}</text>
+          <text x={W-RP+3} y={Y(-i)+3} fill={T.dim} fontSize="8">{i}</text>
+        </g>))}
+        {/* ligne du 0 = All Square */}
+        <line x1={padL} y1={mid} x2={W-RP} y2={mid} stroke={T.dim} strokeOpacity=".7" strokeDasharray="2 3"/>
+        <text x={W-RP+3} y={mid+3} fill={T.dim} fontSize="7.5">AS</text>
+        {/* courbe d'évolution (couleur = qui mène) */}
         <polyline fill="none" stroke={col} strokeWidth="2.2" strokeLinejoin="round" strokeLinecap="round"
-          points={line.map(p=>`${X(p.h)},${Y(p.v)}`).join(" ")}/>
-        {line.length>0 && <circle cx={X(line[line.length-1].h)} cy={Y(cur)} r="3.2" fill={col}/>}
-        {xTicks}
+          points={line.map(p=>`${Xm(p.h)},${Y(p.v)}`).join(" ")}/>
+        {line.length>0 && <circle cx={Xm(line[line.length-1].h)} cy={Y(cur)} r="3.2" fill={col}/>}
+        {[0,8,17].map(h=>(<text key={h} x={Xm(h)} y={H-6} fill={T.dim} fontSize="9"
+          textAnchor={h===0?"start":h===17?"end":"middle"}>{h+1}</text>))}
       </svg>
-      <div style={{textAlign:"center",marginTop:6,fontFamily:"Anton",fontSize:15,color:col}}>{status}</div>
+      {/* nom du joueur/équipe du BAS, aligné à droite */}
+      <div style={{display:"flex",justifyContent:"flex-end",fontSize:11,fontWeight:800,color:T.us,marginTop:2}}>
+        ▼ {data.labelB}</div>
+      <div style={{textAlign:"center",marginTop:6,fontFamily:"Anton",fontSize:16,color:col}}>{status}</div>
     </Shell>;
   }
 
