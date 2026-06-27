@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, deleteGameByDataId, dedupeGamesC
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.59 · scoring une partie à la fois"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.60 · formule éditable amicale"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -2377,6 +2377,9 @@ function GameDetail({g,members,courses,games,setGames,back}){
   // changer la formule d'un flight de tournoi (laisse la main après le tirage proposé)
   const setSubFormula=(rid,sgId,formula)=>save({...g,rounds:g.rounds.map(r=>
     r.id!==rid?r:{...r,subgames:r.subgames.map(sg=>sg.id!==sgId?sg:{...sg,formula})})});
+  // changer la formule d'une sous-partie d'amicale (avant le 1er trou validé)
+  const setSubFormulaSimple=(sgId,formula)=>save({...g,subgames:g.subgames.map(sg=>
+    sg.id!==sgId?sg:{...sg,formula})});
 
   // --- édition scores : amicale (subgames) ou tournoi (rounds[].subgames) ---
   const setScoreSimple=(sgId,pid,hole,v)=>save({...g,subgames:g.subgames.map(sg=>{
@@ -2515,6 +2518,13 @@ function GameDetail({g,members,courses,games,setGames,back}){
             </div>
           );
         }) : keep(g.subgames).map(sg=>{const num=g.subgames.indexOf(sg)+1;return (<div key={sg.id}>
+          {!g.done&&(sg.validated||[]).length===0&&<div style={{...card(T.eu),marginBottom:8}}>
+            <div style={{fontSize:10,color:T.dim,marginBottom:4,textTransform:"uppercase",
+              letterSpacing:.5,fontWeight:700}}>🎲 Formule {g.subgames.length>1?`· Partie ${num}`:""} (modifiable avant le 1er trou)</div>
+            <select value={sg.formula} onChange={e=>setSubFormulaSimple(sg.id,e.target.value)}
+              style={{...inp,marginTop:0}}>
+              {formulasFor(sg.players.length).map(f=>
+                <option key={f} value={f}>{FORMULA_LABELS[f]}</option>)}</select></div>}
           {!g.done&&<ScorerPicker sg={sg} label={g.subgames.length>1?`Partie ${num}`:null}
             scorerId={scorerOf(sg)} canEdit={canEditSub(sg)} myId={myId}
             players={sg.players.map(playerById).filter(Boolean)}
