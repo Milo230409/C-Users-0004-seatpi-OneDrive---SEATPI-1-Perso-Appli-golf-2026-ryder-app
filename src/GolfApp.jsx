@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, deleteGameByDataId, dedupeGamesC
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.56 · Ryder équilibré + tirage intégral"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.57 · configurations multi-parties"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -208,6 +208,7 @@ const FORMULA_SHORT={matchplay:"Match Play",strokeplay_net:"Stroke Play",stablef
   bestworst:"Fourball M&MB",foursome:"Foursome",mexicaine:"Mexicaine",scramble:"Scramble",
   chamble:"Chamble",matchplay2v2:"Match Play 2v2"};
 
+function defaultFormula(size){return size===2?"matchplay":size===3?"chouette":"fourball";}
 function autoSplit(n){
   const map={2:[[2,"matchplay"]],3:[[3,"chouette"]],4:[[4,"fourball"]],
     5:[[2,"matchplay"],[3,"chouette"]],6:[[2,"matchplay"],[4,"fourball"]],
@@ -217,6 +218,20 @@ function autoSplit(n){
   const g=[];let r=n;while(r>=4){g.push({size:4,formula:"fourball"});r-=4;}
   if(r===3)g.push({size:3,formula:"chouette"});else if(r===2)g.push({size:2,formula:"matchplay"});
   else if(r===1&&g.length)g[g.length-1].size+=1;return g;
+}
+// Toutes les configurations possibles de n joueurs en flights de 2, 3 ou 4 (sans reste de 1).
+// Renvoie des tableaux de tailles décroissantes, ex. 6 → [[4,2],[3,3],[2,2,2]].
+function splitConfigs(n){
+  const out=[];
+  const rec=(rem,max,cur)=>{ if(rem===0){out.push([...cur]);return;}
+    for(let s=Math.min(max,rem);s>=2;s--){ if(rem-s===1) continue; rec(rem-s,s,[...cur,s]); } };
+  rec(n,4,[]);
+  return out.sort((a,b)=>a.length-b.length || b[0]-a[0]); // moins de parties d'abord
+}
+// Applique une config (tailles) en gardant les formules existantes quand la taille ne change pas.
+function applyConfig(prev,sizes){
+  return sizes.map((size,i)=>({size,
+    formula:(prev&&prev[i]&&prev[i].size===size)?prev[i].formula:defaultFormula(size)}));
 }
 
 // Tirage Ryder : chapeaux de 2 par index (les + proches ensemble), 1 joueur par chapeau dans
@@ -1065,7 +1080,8 @@ function NewGame({setTab}){
   const [guests,setGuests]=useState([]);
   const [tees,setTees]=useState({});
   const [over,setOver]=useState({});  // overrides {playerId:{index}} ajustables pour la partie
-  const [split,setSplit]=useState(null);
+  const [split,setSplit]=useState(null);          // amicale >4 : répartition en flights
+  const [flightOf,setFlightOf]=useState({});       // amicale >4 : id joueur -> n° de flight
   const [formula,setFormula]=useState(null);
   const [teamOf,setTeamOf]=useState({}); // 2v2 : id joueur -> 0 (Équipe 1) ou 1 (Équipe 2)
   // Tournoi multi-manches : chaque manche a SON parcours ET SA répartition (formules)
@@ -1110,12 +1126,23 @@ function NewGame({setTab}){
   // quand l'effectif change, (ré)initialise la répartition de chaque manche
   useEffect(()=>{if(type==="event"&&n>=2)
     setRounds(rs=>rs.map(r=>({...r,split:autoSplit(n)})));},[n,type]);// eslint-disable-line
+  // amicale à PLUS de 4 joueurs : on prépare une répartition par défaut (et on réinitialise
+  // l'affectation des joueurs quand la config ou l'effectif change).
+  useEffect(()=>{ if(type==="simple"&&n>4){ setSplit(autoSplit(n)); setFlightOf({}); } },[n,type]);// eslint-disable-line
+  // affectation par défaut des joueurs aux flights (séquentielle), surchargée par flightOf
+  const multiSplit=type==="simple"&&n>4?(split||autoSplit(n)):null;
+  const defaultFlight=useMemo(()=>{ const m={}; if(multiSplit){ let idx=0;
+    multiSplit.forEach((grp,gi)=>{ for(let k=0;k<grp.size;k++){ const p=allPlayers[idx++]; if(p)m[p.id]=gi; } }); }
+    return m; },[multiSplit,allPlayers.map(p=>p.id).join(",")]);// eslint-disable-line
+  const flightOfP=p=> flightOf[p.id]!==undefined ? flightOf[p.id] : (defaultFlight[p.id]??0);
+  const flightCount=gi=> allPlayers.filter(p=>flightOfP(p)===gi).length;
 
   // Nom AUTO-DÉDUIT : mode de jeu + brut/net + date + heure (plus de saisie libre).
   const finalName=()=>{
     const d=new Date(),z=n=>String(n).padStart(2,"0");
     const when=`${z(d.getDate())}/${z(d.getMonth()+1)}/${String(d.getFullYear()).slice(2)} · ${z(d.getHours())}h${z(d.getMinutes())}`;
-    const what=type==="event"?(subtype==="ryder"?"Ryder Cup":subtype==="coupe"?"MiniCup":"MiniChamp"):(FORMULA_SHORT[formula]||"Partie");
+    const what=type==="event"?(subtype==="ryder"?"Ryder Cup":subtype==="coupe"?"MiniCup":"MiniChamp")
+      :(type==="simple"&&n>4)?`${(split||autoSplit(n)).length} parties`:(FORMULA_SHORT[formula]||"Partie");
     const nb=brutOnly?"brut":(mode==="gross"?"brut":"net"); // l'info brut/net reste dans le titre
     return `${what} ${nb} · ${when}`;
   };
@@ -1147,10 +1174,22 @@ function NewGame({setTab}){
       index:getIndex(p),
       team:type==="event"?null:(team2v2?(i<2?0:1):undefined)}));
     if(type==="simple"){
-      const ids=roster.map(p=>p.id);
-      const subgames=[{id:1,formula,players:ids,scores:{},validated:[],done:false,hcpRelative}];
+      if(n<=4){
+        const ids=roster.map(p=>p.id);
+        const subgames=[{id:1,formula,players:ids,scores:{},validated:[],done:false,hcpRelative}];
+        const game={id:Date.now(),name:finalName(),type,courseId,mode,roster,subgames,test:isTest,
+          hcpRelative,teamNames:team2v2?["Équipe 1","Équipe 2"]:null,done:false,created:Date.now()};
+        setGames([game,...games]);setTab("history");return;
+      }
+      // PLUS de 4 joueurs : plusieurs parties (flights) selon la configuration choisie
+      const sp=split||autoSplit(n);
+      const flights=sp.map((grp,gi)=>({grp,gi,players:roster.filter(p=>flightOfP(p)===gi)}));
+      const bad=flights.find(f=>f.players.length!==f.grp.size);
+      if(bad) return alert(`Configuration incomplète : la partie ${bad.gi+1} doit compter ${bad.grp.size} joueurs (actuellement ${bad.players.length}). Ajuste l'affectation des joueurs.`);
+      const subgames=flights.map((f,i)=>({id:i+1,formula:f.grp.formula,
+        players:f.players.map(p=>p.id),scores:{},validated:[],done:false,hcpRelative}));
       const game={id:Date.now(),name:finalName(),type,courseId,mode,roster,subgames,test:isTest,
-        hcpRelative,teamNames:team2v2?["Équipe 1","Équipe 2"]:null,done:false,created:Date.now()};
+        hcpRelative,teamNames:null,done:false,created:Date.now()};
       setGames([game,...games]);setTab("history");return;
     }
     if(subtype==="coupe"){
@@ -1361,7 +1400,42 @@ function NewGame({setTab}){
               🌮 La <b style={{color:T.text}}>Mexicaine</b> se joue en <b style={{color:T.text}}>brut</b> :
               système de <b style={{color:T.text}}>points cumulés</b> (pas de net, pas de match play).</div>
           : decompteUI}
-      </>):n>4?<Warn>Partie amicale = 2 à 4 joueurs. Passe en "Tournoi" pour {n}.</Warn>:null)}
+      </>):(()=>{
+        // PLUS de 4 joueurs : on propose des configurations (ex. 6 → 4+2, 3+3, 2+2+2),
+        // une formule par sous-partie, et l'affectation déplaçable des joueurs.
+        const sp=split||autoSplit(n);
+        const setF=(gi,val)=>setSplit(sp.map((x,k)=>k===gi?{...x,formula:val}:x));
+        return (<>
+        <Section>1. Configuration ({n} joueurs)</Section>
+        <ConfigPicker n={n} current={sp} onPick={sizes=>{setSplit(applyConfig(sp,sizes));setFlightOf({});}}/>
+        {sp.map((grp,gi)=>{const cnt=flightCount(gi);const okC=cnt===grp.size;
+          return (<div key={gi} style={card(okC?T.accent:T.gold)}>
+            <div style={{fontWeight:800,marginBottom:6,display:"flex",justifyContent:"space-between"}}>
+              <span>Partie {gi+1} · {grp.size} joueurs</span>
+              <span style={{color:okC?T.accent:T.gold,fontSize:12}}>{cnt}/{grp.size}</span></div>
+            <select value={grp.formula} onChange={e=>setF(gi,e.target.value)} style={inp}>
+              {formulasFor(grp.size).map(f=><option key={f} value={f}>{FORMULA_LABELS[f]}</option>)}</select>
+          </div>);})}
+        <Section>2. Qui joue dans quelle partie ?</Section>
+        <div style={{fontSize:11,color:T.dim,marginBottom:6}}>Tape pour déplacer un joueur d'une partie à l'autre.</div>
+        {allPlayers.map(p=>(
+          <div key={p.id} style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
+            <span style={{flex:1,minWidth:0,fontWeight:700,fontSize:13,whiteSpace:"nowrap",
+              overflow:"hidden",textOverflow:"ellipsis"}}>{dispName(p)}</span>
+            <div style={{display:"flex",gap:4,flexShrink:0}}>
+              {sp.map((grp,gi)=>{const act=flightOfP(p)===gi;
+                return <button key={gi} onClick={()=>setFlightOf(o=>({...o,[p.id]:gi}))}
+                  style={{...chip,padding:"6px 10px",fontSize:12,
+                  border:`2px solid ${act?T.accent:T.line}`,background:act?T.panel2:T.panel,
+                  color:act?T.text:T.dim,fontWeight:act?800:600}}>P{gi+1}</button>;})}
+            </div>
+          </div>))}
+        {sp.some((grp,gi)=>flightCount(gi)!==grp.size)&&
+          <div style={{fontSize:11,color:T.gold,marginTop:2}}>⚠️ Chaque partie doit avoir son nombre exact de joueurs.</div>}
+        <Section>3. Décompte</Section>
+        {decompteUI}
+        </>);
+      })())}
 
       {type==="event"&&subtype!=="coupe"&&n>=2&&(<>
         <Section>Formules par manche (modifiable)</Section>
@@ -1378,6 +1452,8 @@ function NewGame({setTab}){
                 <span style={{background:T.gold,color:"#1a1200",borderRadius:6,
                   padding:"2px 8px",fontSize:12}}>MANCHE {ri+1}</span>
                 <span style={{fontSize:13}}>{c?.name}</span></div>
+              {n>4&&<ConfigPicker n={n} current={sp}
+                onPick={sizes=>setRoundSplit(ri,applyConfig(sp,sizes))}/>}
               {sp.map((grp,gi)=>(
                 <div key={gi} style={{marginBottom:6}}>
                   <span style={{fontSize:10,color:T.dim}}>Match {gi+1} · {grp.size} joueurs</span>
@@ -1413,6 +1489,23 @@ function NewGame({setTab}){
 function ChouetteInfo(){return <div style={{...card(T.gold),fontSize:12,color:T.dim,marginTop:8}}>
   🦉 Chouette : 6 pts/trou. 1er 4 · 2e 2 · 3e 0. Égalités : 1ers 3/3/0 · 2es 4/1/1 ·
   triple nul 2/2/2.</div>;}
+// Sélecteur de configuration : propose les partitions possibles (ex. 6 → 4+2, 3+3, 2+2+2).
+function ConfigPicker({n,current,onPick}){
+  const configs=splitConfigs(n);
+  if(configs.length<=1) return null; // aucune alternative
+  const curKey=current?current.map(g=>g.size).join("-"):"";
+  return (<div style={{marginBottom:8}}>
+    <div style={{fontSize:10,color:T.dim,marginBottom:4,textTransform:"uppercase",
+      letterSpacing:.5,fontWeight:700}}>Configuration des parties</div>
+    <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+      {configs.map((sizes,i)=>{const k=sizes.join("-");const active=k===curKey;
+        return <button key={i} type="button" onClick={()=>onPick(sizes)}
+          style={{...chip,padding:"7px 12px",fontSize:12,
+          border:`2px solid ${active?T.accent:T.line}`,background:active?T.panel2:T.panel,
+          color:active?T.text:T.dim,fontWeight:active?800:600}}>
+          {sizes.join(" + ")}{sizes.length>1?` · ${sizes.length} parties`:""}</button>;})}
+    </div></div>);
+}
 function EventSplit({split,setSplit}){
   const change=(i,f)=>setSplit(split.map((g,j)=>j===i?{...g,formula:f}:g));
   return (<div>{split.map((g,i)=>(<div key={i} style={card(T.accent)}>
