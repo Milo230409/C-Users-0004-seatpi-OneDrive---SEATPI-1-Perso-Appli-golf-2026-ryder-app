@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, deleteGameByDataId, dedupeGamesC
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.62 · navigation par partie"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.63 · tirage à valider"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -261,6 +261,33 @@ function drawTeams(roster){
   if(odd){const p=odd[0];const t=tot[0]<=tot[1]?0:1;assign[p.id]=t;tot[t]+=idx(p);cnt[t]++;
     hats.push(t===0?{a:p.id,b:null}:{a:null,b:p.id});}
   return {assign,hats};
+}
+// Énumère les configurations d'équipes possibles (1 joueur par chapeau dans chaque équipe),
+// CLASSÉES de la plus équilibrée (écart de total d'index le plus faible) à la moins équilibrée.
+// Permet de proposer le tirage le + pertinent, puis le 2e, le 3e… si on veut refaire.
+function drawTeamConfigs(roster){
+  const idx=p=>p.index||0;
+  const sorted=[...roster].sort((a,b)=>idx(a)-idx(b));
+  const pairs=[];for(let i=0;i<sorted.length;i+=2)pairs.push(sorted.slice(i,i+2));
+  const full=pairs.filter(p=>p.length===2);
+  const odd=pairs.find(p=>p.length===1)?.[0]||null;
+  const h=full.length;
+  const out=[],seen=new Set();
+  for(let mask=0;mask<(1<<h);mask++){
+    const assign={},hats=[];let t0=0,t1=0;
+    full.forEach((pair,i)=>{const bit=(mask>>i)&1;
+      const a=bit?pair[1]:pair[0],b=bit?pair[0]:pair[1]; // a→Éq0, b→Éq1
+      assign[a.id]=0;assign[b.id]=1;t0+=idx(a);t1+=idx(b);hats.push({a:a.id,b:b.id});});
+    if(odd){const t=t0<=t1?0:1;assign[odd.id]=t;
+      if(t===0){t0+=idx(odd);hats.push({a:odd.id,b:null});}else{t1+=idx(odd);hats.push({a:null,b:odd.id});}}
+    const team0=Object.keys(assign).filter(id=>assign[id]===0).sort().join(",");
+    const team1=Object.keys(assign).filter(id=>assign[id]===1).sort().join(",");
+    const key=[team0,team1].sort().join("|"); // dédupe miroir (Éq0/Éq1 interchangeables)
+    if(seen.has(key))continue; seen.add(key);
+    out.push({assign,hats,diff:Math.abs(t0-t1),tot:[Math.round(t0*10)/10,Math.round(t1*10)/10]});
+  }
+  out.sort((a,b)=>a.diff-b.diff);
+  return out;
 }
 // Génère une PROPOSITION de confrontations par manche. Ryder = équipe contre équipe, mais le
 // TIRAGE est INTÉGRAL (appariements aléatoires à chaque manche, PAS en fonction des chapeaux) :
@@ -3468,53 +3495,52 @@ function LiveBoard({sg,ps,course,net,result}){
   );
 }
 
-/* ===== Tirage 3 chapeaux (Ryder Cup) : équilibré par index, animé ===== */
+/* ===== Tirage chapeaux (Ryder Cup) : propositions classées par équilibre + valider/refaire ===== */
 function DrawHats({g,onAssign}){
   const [spinning,setSpinning]=useState(false);
-  const [result,setResult]=useState(null);
-  const byId=id=>g.roster.find(p=>p.id===id);
+  const [configs,setConfigs]=useState(null); // configs classées (plus équilibrée d'abord)
+  const [idx,setIdx]=useState(0);
   const draw=()=>{
-    setSpinning(true);setResult(null);
-    setTimeout(()=>{
-      const {assign,hats}=drawTeams(g.roster);
-      const e0=g.roster.filter(p=>assign[p.id]===0),e1=g.roster.filter(p=>assign[p.id]===1);
-      setResult({hats,e0,e1});setSpinning(false);
-      onAssign({assign,hats});
-    },1100);
+    setSpinning(true);setConfigs(null);
+    setTimeout(()=>{ setConfigs(drawTeamConfigs(g.roster)); setIdx(0); setSpinning(false); },1100);
   };
   const [n0,n1]=g.teamNames||["Équipe 1","Équipe 2"];
   const nh=Math.ceil(g.roster.length/2);
+  const cur=configs?configs[idx]:null;
+  const e0=cur?g.roster.filter(p=>cur.assign[p.id]===0):[];
+  const e1=cur?g.roster.filter(p=>cur.assign[p.id]===1):[];
+  const validate=()=>cur&&onAssign({assign:cur.assign,hats:cur.hats});
+  const another=()=>setIdx(i=>(i+1)%configs.length);
   return (
     <div style={{...card(T.us),marginBottom:14}}>
-      <div style={{fontWeight:800,marginBottom:4}}>🎩 Tirage · chapeaux de 2 (par index)</div>
+      <div style={{fontWeight:800,marginBottom:4}}>🎩 Tirage des équipes (par index)</div>
       <div style={{fontSize:11,color:T.dim,marginBottom:8}}>
-        Joueurs triés par index → {nh} chapeaux de 2 (les + proches ensemble) → 1 par chapeau
-        dans chaque équipe, avec <b>totaux d'index les plus serrés possible</b>. Les confrontations
-        de chaque manche sont ensuite proposées par <b>tirage intégral</b> (appariements aléatoires),
-        modifiables.</div>
-      <button onClick={draw} disabled={spinning} style={{...addBtn,marginTop:0,
+        Joueurs triés par index → {nh} chapeaux de 2 → 1 par chapeau dans chaque équipe, avec les
+        <b> totaux d'index les plus serrés</b>. Tu valides, ou tu demandes la proposition suivante
+        (la 2e plus équilibrée, puis la 3e…).</div>
+      {!configs&&<button onClick={draw} disabled={spinning} style={{...addBtn,marginTop:0,
         background:spinning?T.line:`linear-gradient(90deg,${T.eu},${T.us})`,color:"#fff",
         fontFamily:"'Archivo',sans-serif",letterSpacing:.5,fontSize:16}}>
         {spinning?<span><span style={{display:"inline-block",animation:"spin .7s linear infinite"}}>🎩</span> Tirage…</span>
-          :"🎩 LANCER LE TIRAGE"}</button>
-      {result&&<div style={{marginTop:12}}>
-        {result.hats.map((hat,i)=>{const a=byId(hat.a),b=byId(hat.b);
-          return (
-          <div key={i} style={{...card(T.gold),animation:`pop .4s ${i*.1}s both`,padding:"7px 10px"}}>
-            <div style={{fontWeight:800,fontSize:12}}>Chapeau {i+1}</div>
-            <div style={{fontSize:12,marginTop:2}}>
-              {[a,b].filter(Boolean).map(p=>`${dispName(p)} (${p.index})`).join(" · ")}</div>
-          </div>);})}
-        <div style={{display:"flex",gap:10,marginTop:8}}>
-          <div style={{flex:1,background:T.eu,borderRadius:10,padding:10,animation:"pop .5s .4s both"}}>
-            <div style={{fontFamily:"Anton",fontSize:15}}>{n0}</div>
-            {result.e0.map(p=><div key={p.id} style={{fontSize:12,marginTop:2}}>{dispName(p)}</div>)}</div>
-          <div style={{flex:1,background:T.us,borderRadius:10,padding:10,animation:"pop .5s .55s both"}}>
-            <div style={{fontFamily:"Anton",fontSize:15}}>{n1}</div>
-            {result.e1.map(p=><div key={p.id} style={{fontSize:12,marginTop:2}}>{dispName(p)}</div>)}</div>
+          :"🎩 LANCER LE TIRAGE"}</button>}
+      {cur&&<div>
+        <div style={{display:"flex",gap:10,marginTop:4}}>
+          <div style={{flex:1,background:T.eu,borderRadius:10,padding:10}}>
+            <div style={{fontFamily:"Anton",fontSize:15}}>{n0} <span style={{fontSize:11,opacity:.8}}>· Σ{cur.tot[0]}</span></div>
+            {e0.map(p=><div key={p.id} style={{fontSize:12,marginTop:2}}>{dispName(p)} <span style={{opacity:.7}}>({p.index})</span></div>)}</div>
+          <div style={{flex:1,background:T.us,borderRadius:10,padding:10}}>
+            <div style={{fontFamily:"Anton",fontSize:15}}>{n1} <span style={{fontSize:11,opacity:.8}}>· Σ{cur.tot[1]}</span></div>
+            {e1.map(p=><div key={p.id} style={{fontSize:12,marginTop:2}}>{dispName(p)} <span style={{opacity:.7}}>({p.index})</span></div>)}</div>
         </div>
-        <div style={{fontSize:11,color:T.dim,marginTop:6}}>
-          Équipes appliquées ✅ — tu peux encore ajuster ci-dessous.</div>
+        <div style={{fontSize:11,color:T.dim,marginTop:8,textAlign:"center"}}>
+          Proposition {idx+1}/{configs.length} · écart d'index <b style={{color:cur.diff<=2?T.accent:T.gold}}>{cur.diff}</b>
+          {idx===0?" (la plus équilibrée)":""}</div>
+        <div style={{display:"flex",gap:8,marginTop:10}}>
+          <button onClick={validate} style={{...addBtn,flex:1,margin:0,background:T.accent,color:"#04150b"}}>✅ Valider ces équipes</button>
+          {configs.length>1&&<button onClick={another} style={{...delBtn,flex:1,borderColor:T.gold,color:T.gold}}>🔄 Autre proposition</button>}
+        </div>
+        <div style={{fontSize:10,color:T.dim,marginTop:6,textAlign:"center"}}>
+          Tant que tu ne valides pas, les équipes ne sont pas appliquées.</div>
       </div>}
     </div>
   );
