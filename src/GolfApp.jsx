@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, deleteGameByDataId, dedupeGamesC
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.55 · parties test + filtre"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.56 · Ryder équilibré + tirage intégral"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -219,57 +219,70 @@ function autoSplit(n){
   else if(r===1&&g.length)g[g.length-1].size+=1;return g;
 }
 
-// Tirage Ryder : chapeaux de 2 par index (les + bas ensemble…), 1 joueur par chapeau dans
-// chaque équipe. Renvoie {assign:{id->0|1}, hats:[{a:idÉq0,b:idÉq1}]}.
+// Tirage Ryder : chapeaux de 2 par index (les + proches ensemble), 1 joueur par chapeau dans
+// chaque équipe. EN PLUS, on choisit le côté de chaque joueur pour rendre le TOTAL d'index
+// des deux équipes le plus serré possible. Renvoie {assign:{id->0|1}, hats:[{a:idÉq0,b:idÉq1}]}.
 function drawTeams(roster){
-  const sorted=[...roster].sort((a,b)=>(a.index||0)-(b.index||0));
-  const assign={},hats=[];const cnt=[0,0];
-  for(let i=0;i<sorted.length;i+=2){
-    const pair=sorted.slice(i,i+2);
-    if(pair.length===2){
-      const flip=Math.random()<.5;const a=flip?pair[1]:pair[0],b=flip?pair[0]:pair[1];
-      assign[a.id]=0;assign[b.id]=1;cnt[0]++;cnt[1]++;hats.push({a:a.id,b:b.id});
-    } else { const t=cnt[0]<=cnt[1]?0:1;assign[pair[0].id]=t;cnt[t]++;
-      hats.push(t===0?{a:pair[0].id,b:null}:{a:null,b:pair[0].id}); }
-  }
+  const idx=p=>p.index||0;
+  const sorted=[...roster].sort((a,b)=>idx(a)-idx(b));
+  const pairs=[];for(let i=0;i<sorted.length;i+=2)pairs.push(sorted.slice(i,i+2));
+  const assign={},hats=[];const tot=[0,0],cnt=[0,0];
+  // chapeaux complets : on traite d'abord ceux au plus grand écart (impact max sur l'équilibre),
+  // et pour chacun on met le joueur fort du côté qui resserre le plus les totaux.
+  const full=pairs.filter(p=>p.length===2)
+    .sort((p,q)=>Math.abs(idx(q[0])-idx(q[1]))-Math.abs(idx(p[0])-idx(p[1])));
+  full.forEach(pair=>{
+    const lo=idx(pair[0])<=idx(pair[1])?pair[0]:pair[1];
+    const hi=lo===pair[0]?pair[1]:pair[0];
+    const dA=Math.abs((tot[0]+idx(hi))-(tot[1]+idx(lo))); // hi→Éq0
+    const dB=Math.abs((tot[0]+idx(lo))-(tot[1]+idx(hi))); // hi→Éq1
+    const hiTo0 = dA<dB ? true : dB<dA ? false : Math.random()<.5; // égalité → aléatoire
+    const t0=hiTo0?hi:lo, t1=hiTo0?lo:hi;
+    assign[t0.id]=0;assign[t1.id]=1;tot[0]+=idx(t0);tot[1]+=idx(t1);cnt[0]++;cnt[1]++;
+    hats.push({a:t0.id,b:t1.id});
+  });
+  // chapeau impair (1 joueur) : rejoint l'équipe au total d'index le plus faible
+  const odd=pairs.find(p=>p.length===1);
+  if(odd){const p=odd[0];const t=tot[0]<=tot[1]?0:1;assign[p.id]=t;tot[t]+=idx(p);cnt[t]++;
+    hats.push(t===0?{a:p.id,b:null}:{a:null,b:p.id});}
   return {assign,hats};
 }
-// Génère une PROPOSITION de confrontations par manche à partir des chapeaux :
-//  - match play (2 joueurs) = un chapeau (a vs b) → confrontations homogènes ;
-//  - 2v2 (4 joueurs) = 2 chapeaux (a1,a2 vs b1,b2) ;
-//  - rotation des chapeaux à chaque manche (chacun fait le 1v1 à son tour) ;
-//  - 6 joueurs / 4 manches : la dernière manche devient 2 chouettes (plus sympa).
-// Modifiable ensuite à la main (formules + régénération).
+// Génère une PROPOSITION de confrontations par manche. Ryder = équipe contre équipe, mais le
+// TIRAGE est INTÉGRAL (appariements aléatoires à chaque manche, PAS en fonction des chapeaux) :
+//  - 1v1 = un joueur Éq0 (au hasard) contre un joueur Éq1 (au hasard) ;
+//  - 2v2 = 2 joueurs Éq0 contre 2 joueurs Éq1 (au hasard) ;
+//  - 6 joueurs / 4 manches : la dernière manche devient 2 chouettes (plus sympa) ;
+//  - formules variées par manche. Modifiable ensuite à la main (formules + régénération).
 function buildConfrontations(g){
   const roster=g.roster||[];const n=roster.length;
-  const hats=(g.hats||[]).filter(h=>h.a&&h.b); // chapeaux complets (paires)
-  if(!hats.length||!g.rounds) return g.rounds;
+  if(!g.rounds) return g.rounds;
+  const team0=roster.filter(p=>p.team===0), team1=roster.filter(p=>p.team===1);
+  if(!team0.length||!team1.length) return g.rounds; // équipes pas encore formées
   return g.rounds.map((r,ri)=>{
     let plan=r.subgames.map(sg=>({size:(sg.players||[]).length||2,formula:sg.formula,id:sg.id}));
     if(n===6 && g.rounds.length===4 && ri===3)
       plan=[{size:3,formula:"chouette",id:1},{size:3,formula:"chouette",id:2}];
-    const rot=hats.map((_,i)=>hats[(i+ri)%hats.length]); // chapeaux tournés selon la manche
-    // Formules VARIÉES (proposition ludique) : on tourne selon la manche. Modifiable à la main.
+    // TIRAGE INTÉGRAL : on re-mélange chaque équipe à chaque manche.
+    const A=shuffleArr(team0), B=shuffleArr(team1);
     const F1V1=["matchplay","stableford","skins","strokeplay_net"];
     const F2V2=["fourball","bestworst","scramble","chamble"];
-    let hi=0,c2=0,c4=0;const used=new Set();
+    let c2=0,c4=0;
     const subs=plan.map(fl=>{
       let players=[],formula=fl.formula;
       if(fl.size===2){ formula=F1V1[(ri+c2++)%F1V1.length];
-        if(hi<rot.length){const h=rot[hi++];players=[h.a,h.b];} }
+        const a=A.shift(),b=B.shift(); players=[a,b].filter(Boolean).map(p=>p.id); }
       else if(fl.size===4){ formula=F2V2[(ri+c4++)%F2V2.length];
-        if(hi+1<rot.length){const h1=rot[hi++],h2=rot[hi++];players=[h1.a,h2.a,h1.b,h2.b];} }
-      players.forEach(id=>used.add(id));
+        const picks=[A.shift(),A.shift(),B.shift(),B.shift()].filter(Boolean);
+        players=picks.map(p=>p.id); }
+      else if(fl.size===3){ // chouette : mélange des restants des 2 équipes
+        const picks=[A.shift(),B.shift(),A.shift()||B.shift()].filter(Boolean);
+        players=picks.map(p=>p.id); }
       return {id:fl.id,formula,players,scores:{},validated:[],done:false,hcpRelative:g.hcpRelative};
     });
-    // flights restants (chouette/size 3…) : on remplit avec les non-utilisés en mixant les équipes
-    const remA=roster.filter(p=>!used.has(p.id)&&p.team===0);
-    const remB=roster.filter(p=>!used.has(p.id)&&p.team===1);
-    subs.forEach((s,si)=>{ if(s.players.length) return; const need=plan[si].size;const pick=[];
-      for(let k=0;k<need;k++){ const wantA=(k%2===0)?remA.length>0:remB.length===0;
-        if(wantA&&remA.length)pick.push(remA.shift()); else if(remB.length)pick.push(remB.shift());
-        else if(remA.length)pick.push(remA.shift()); }
-      s.players=pick.map(p=>p.id); });
+    // sécurité : si un flight n'a pas son compte, on complète avec les joueurs restants
+    const rest=[...A,...B];
+    subs.forEach((s,si)=>{ const need=plan[si].size;
+      while(s.players.length<need && rest.length) s.players.push(rest.shift().id); });
     return {...r,subgames:subs};
   });
 }
@@ -1210,7 +1223,7 @@ function NewGame({setTab}){
         <b style={{color:T.text}}> Intégral</b>, je livre les Poules juste après.</div>}
       {type==="event"&&subtype==="ryder"&&<div style={{...card(T.us),fontSize:12,
         color:T.dim,marginBottom:4}}>
-        Ryder Cup : deux équipes, tirage au sort en chapeaux (équilibré par index)
+        Ryder Cup : deux équipes, tirage en chapeaux (équilibré par index, totaux serrés)
         à lancer dans le détail du tournoi, et cumul des points sur toutes les manches.</div>}
       {type==="event"&&subtype==="coupe"&&<div style={{...card(T.gold),fontSize:12,
         color:T.dim,marginBottom:4,lineHeight:1.5}}>
@@ -2300,7 +2313,7 @@ function GameDetail({g,members,courses,games,setGames,back}){
         {g.subtype==="ryder"&&<DrawHats g={g} onAssign={applyDraw}/>}
         {g.subtype==="ryder"&&(g.hats||[]).length>0&&!g.done&&<button onClick={regenConfrontations}
           style={{...delBtn,width:"100%",marginBottom:12,fontSize:12,borderColor:T.gold,color:T.gold}}>
-          🔄 Re-proposer les confrontations (mêmes chapeaux)</button>}
+          🔄 Re-tirer les confrontations (nouveau tirage aléatoire)</button>}
         {g.type==="event"&&g.subtype!=="coupe"&&<TeamManager g={g} renameTeam={renameTeam} setTeam={setTeam}/>}
         {g.subtype==="coupe"&&(!g.rounds||!g.rounds.length)&&!g.done&&(
           <div style={{...card(T.gold),marginBottom:12,textAlign:"center"}}>
@@ -3280,9 +3293,10 @@ function DrawHats({g,onAssign}){
     <div style={{...card(T.us),marginBottom:14}}>
       <div style={{fontWeight:800,marginBottom:4}}>🎩 Tirage · chapeaux de 2 (par index)</div>
       <div style={{fontSize:11,color:T.dim,marginBottom:8}}>
-        Joueurs triés par index → {nh} chapeaux de 2 (les + bas ensemble, etc.) → 1 par chapeau
-        dans chaque équipe. Les confrontations de chaque manche sont ensuite proposées
-        automatiquement (match play <b>chapeau contre chapeau</b>), modifiables.</div>
+        Joueurs triés par index → {nh} chapeaux de 2 (les + proches ensemble) → 1 par chapeau
+        dans chaque équipe, avec <b>totaux d'index les plus serrés possible</b>. Les confrontations
+        de chaque manche sont ensuite proposées par <b>tirage intégral</b> (appariements aléatoires),
+        modifiables.</div>
       <button onClick={draw} disabled={spinning} style={{...addBtn,marginTop:0,
         background:spinning?T.line:`linear-gradient(90deg,${T.eu},${T.us})`,color:"#fff",
         fontFamily:"'Archivo',sans-serif",letterSpacing:.5,fontSize:16}}>
