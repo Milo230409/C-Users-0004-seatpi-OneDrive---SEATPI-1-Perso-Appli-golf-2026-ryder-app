@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, deleteGameByDataId, dedupeGamesC
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.60 · formule éditable amicale"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.61 · coups rendus par partie"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -2426,7 +2426,7 @@ function GameDetail({g,members,courses,games,setGames,back}){
         <Pill active={view==="evo"} onClick={()=>setView("evo")}>📈 Suivi score</Pill>
       </div>
 
-      {view==="briefing" && <Briefing g={g} course={refCourse} playerById={playerById}
+      {view==="briefing" && <Briefing g={g} course={refCourse} courses={courses} playerById={playerById}
         onStart={()=>setView("score")}/>}
 
       {view==="evo" && (()=>{
@@ -2460,7 +2460,8 @@ function GameDetail({g,members,courses,games,setGames,back}){
         const current=mySubs.find(sg=>!subComplete(sg))||mySubs[mySubs.length-1];
         const keep=list=>focus?list.filter(sg=>sg===current):list;
         return <>
-        {g.subtype==="ryder"&&<DrawHats g={g} onAssign={applyDraw}/>}
+        {/* tirage des équipes : visible UNIQUEMENT tant que les équipes ne sont pas formées */}
+        {g.subtype==="ryder"&&!g.done&&!g.roster.some(p=>p.team===0||p.team===1)&&<DrawHats g={g} onAssign={applyDraw}/>}
         {g.subtype==="ryder"&&(g.hats||[]).length>0&&!g.done&&<button onClick={regenConfrontations}
           style={{...delBtn,width:"100%",marginBottom:12,fontSize:12,borderColor:T.gold,color:T.gold}}>
           🔄 Re-tirer les confrontations (nouveau tirage aléatoire)</button>}
@@ -2703,60 +2704,77 @@ function HolesBriefing({course}){
   );
 }
 
-function Briefing({g,course,playerById,onStart}){
+function Briefing({g,course,courses,playerById,onStart}){
   const net=g.mode==="net";
   const rel=!!g.hcpRelative; // coups rendus en différentiel (match play)
-  const base=g.roster.map(p=>{const t=teeData(course,p.tee);
-    return {p,t,raw:courseHandicap(p.index,t.slope,t.cr,t.par)};});
-  const minChp=base.length?Math.min(...base.map(r=>r.raw)):0;
-  const rows=base.map(({p,t,raw})=>{
-    const chp=rel?raw-minChp:raw;               // coups réellement rendus
-    const holes=net?strokeHoles(chp,course?.si):[];
-    return {p,t,chp,holes};
-  });
+  const teamNames=g.teamNames||null;
+  // Les flights (sous-parties), CHACUN avec son parcours. ⚠️ Le différentiel se calcule
+  // PAR FLIGHT : le plus bas de CETTE partie joue à 0, pas le plus bas de tout le champ.
+  const flights = g.rounds
+    ? g.rounds.flatMap(r=>r.subgames.map((sg,i)=>({sg,
+        course:(courses||[]).find(c=>c.id===r.courseId)||course,
+        label:`Manche ${r.id}${r.subgames.length>1?` · Partie ${i+1}`:""}`})))
+    : (g.subgames||[]).map((sg,i)=>({sg,course,
+        label:(g.subgames.length>1?`Partie ${i+1}`:null)}));
+  const flightRows=({sg,course:co})=>{
+    const ps=(sg.players||[]).map(playerById).filter(Boolean);
+    const base=ps.map(p=>{const t=teeData(co,p.tee);
+      return {p,t,raw:courseHandicap(p.index,t.slope,t.cr,t.par)};});
+    const minChp=base.length?Math.min(...base.map(r=>r.raw)):0; // référence = plus bas DU FLIGHT
+    return base.map(({p,t,raw})=>{const chp=rel?raw-minChp:raw;
+      return {p,t,chp,holes:net?strokeHoles(chp,co?.si):[]};});
+  };
   return (
     <div>
       <div style={{...card(T.accent)}}>
-        <div style={{fontWeight:800,marginBottom:4}}>⛳ {course?.name}</div>
+        <div style={{fontWeight:800,marginBottom:4}}>⛳ {course?.name}{g.rounds?` (+${g.rounds.length-1} manche${g.rounds.length>2?"s":""})`:""}</div>
         <div style={{fontSize:12,color:T.dim}}>
           Par {course?.par} · {g.mode==="net"?"Jeu en NET (coups rendus)":"Jeu en BRUT"}
           {g.mode==="net"&&g.hcpRelative?" · 🆚 différentiel (match play)":g.mode==="net"?" · intégral":""}</div>
-        <div style={{marginTop:8,fontSize:11,color:T.dim,fontWeight:700}}>DÉPARTS DU PARCOURS</div>
-        <div style={{display:"flex",flexWrap:"wrap",gap:6,marginTop:4}}>
-          {(course?.tees||[]).map(t=>(
-            <span key={t.name} style={{fontSize:11,padding:"3px 8px",borderRadius:6,
-              background:T.panel2,display:"flex",alignItems:"center",gap:5}}>
-              <span style={{width:9,height:9,borderRadius:2,background:teeDot(t.name)}}/>
-              {t.name} · SSS {t.cr} · Slope {t.slope}{t.length?` · ${t.length} m`:""}</span>))}
-        </div>
       </div>
+
+      {/* ÉQUIPES (Ryder / tournoi par équipes) — affichées dans le brief */}
+      {teamNames && g.roster.some(p=>p.team===0||p.team===1) && (
+        <div style={{display:"flex",gap:8,marginTop:10}}>
+          {[0,1].map(ti=>(
+            <div key={ti} style={{flex:1,...card(ti===0?T.eu:T.us)}}>
+              <div style={{fontWeight:800,fontSize:13,marginBottom:4}}>{teamNames[ti]}</div>
+              {g.roster.filter(p=>p.team===ti).map(p=>(
+                <div key={p.id} style={{fontSize:12,color:T.text}}>{dispName(p)} <span style={{color:T.dim,fontSize:10}}>({p.index})</span></div>))}
+            </div>))}
+        </div>)}
 
       {course && <HolesBriefing course={course}/>}
 
-      <Section>Coups rendus par joueur</Section>
-      {rows.map(({p,t,chp,holes})=>(
-        <div key={p.id} style={{...card(p.team===0?T.eu:p.team===1?T.us:T.line)}}>
-          <div style={{display:"flex",alignItems:"center",gap:8}}>
-            <span style={{width:12,height:12,borderRadius:3,background:teeDot(p.tee),
-              border:`1px solid ${T.line}`}}/>
-            <span style={{fontWeight:800,flex:1}}>{dispName(p)}</span>
-            <span style={{fontFamily:"Anton",fontSize:22,color:T.gold}}>{net?chp:0}</span>
-          </div>
-          <div style={{fontSize:11,color:T.dim,marginTop:4}}>
-            Index de jeu {p.index} · départ {p.tee}
-            {" "}(SSS {t.cr} · Slope {t.slope})</div>
-          {net && <div style={{marginTop:8}}>
-            <div style={{fontSize:11,color:T.dim,marginBottom:4}}>
-              {chp<=0?"🟢 Joueur de référence (0 coup rendu)":
-                `Reçoit ${chp} coup(s) sur :`}</div>
-            <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
-              {holes.map(h=>(<span key={h.hole} style={{fontSize:11,padding:"3px 7px",
-                borderRadius:6,background:T.panel2,fontWeight:700}}>
-                Trou {h.hole}{h.n>1?` ×${h.n}`:""}</span>))}
-              {holes.length===0 && <span style={{fontSize:11,color:T.dim}}>aucun</span>}
-            </div></div>}
-        </div>
-      ))}
+      <Section>Coups rendus {rel?"(différentiel · par partie)":"par joueur"}</Section>
+      {flights.map(({sg,course:co,label},fi)=>{
+        const rows=flightRows({sg,course:co});
+        if(!rows.length) return null;
+        return (<div key={fi} style={{marginBottom:6}}>
+          {label && <div style={{fontSize:11,fontWeight:800,color:T.gold,margin:"8px 0 4px"}}>
+            {label}{co&&g.rounds?` · ${co.name}`:""}</div>}
+          {rows.map(({p,t,chp,holes})=>(
+            <div key={p.id} style={{...card(p.team===0?T.eu:p.team===1?T.us:T.line)}}>
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <span style={{width:12,height:12,borderRadius:3,background:teeDot(p.tee),
+                  border:`1px solid ${T.line}`}}/>
+                <span style={{fontWeight:800,flex:1}}>{dispName(p)}</span>
+                <span style={{fontFamily:"Anton",fontSize:22,color:T.gold}}>{net?chp:0}</span>
+              </div>
+              <div style={{fontSize:11,color:T.dim,marginTop:4}}>
+                Index de jeu {p.index} · départ {p.tee} (SSS {t.cr} · Slope {t.slope})</div>
+              {net && <div style={{marginTop:8}}>
+                <div style={{fontSize:11,color:T.dim,marginBottom:4}}>
+                  {chp<=0?"🟢 Joueur de référence (0 coup rendu)":`Reçoit ${chp} coup(s) sur :`}</div>
+                <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
+                  {holes.map(h=>(<span key={h.hole} style={{fontSize:11,padding:"3px 7px",
+                    borderRadius:6,background:T.panel2,fontWeight:700}}>
+                    Trou {h.hole}{h.n>1?` ×${h.n}`:""}</span>))}
+                  {holes.length===0 && <span style={{fontSize:11,color:T.dim}}>aucun</span>}
+                </div></div>}
+            </div>))}
+        </div>);
+      })}
       <button onClick={onStart} style={{...addBtn,fontFamily:"'Archivo',sans-serif",fontSize:16,letterSpacing:.5}}>C'EST PARTI → SAISIR LES SCORES</button>
     </div>
   );
