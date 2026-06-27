@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, deleteGameByDataId, dedupeGamesC
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.63 · tirage à valider"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.64 · score épuré (équipes repliées)"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -2389,6 +2389,7 @@ function GameDetail({g,members,courses,games,setGames,back}){
     ||String(scorerOf(sg))===String(myId);
   const [showAll,setShowAll]=useState(false);
   const [openMatch,setOpenMatch]=useState(undefined); // undefined=auto(ma partie) · null=liste · "clé"=une partie
+  const [showSetup,setShowSetup]=useState(false);     // équipes & confrontations (replié par défaut)
   const setTeam=(pid,team)=>save({...g,roster:g.roster.map(p=>p.id===pid?{...p,team}:p)});
   // Tirage appliqué : équipes + chapeaux + PROPOSITION de confrontations par manche
   const applyDraw=({assign,hats})=>{
@@ -2503,12 +2504,24 @@ function GameDetail({g,members,courses,games,setGames,back}){
               setScore={setSc} validateHole={valH} done={g.done||!canEditSub(sg)}/>
           </div>);};
         // bandeau de contrôles (tirage, équipes, reconfig) — niveau « vue d'ensemble »
+        const teamsFormed=g.roster.some(p=>p.team===0||p.team===1);
         const overview=<>
-          {g.subtype==="ryder"&&!g.done&&!g.roster.some(p=>p.team===0||p.team===1)&&<DrawHats g={g} onAssign={applyDraw}/>}
-          {g.subtype==="ryder"&&(g.hats||[]).length>0&&!g.done&&<button onClick={regenConfrontations}
-            style={{...delBtn,width:"100%",marginBottom:12,fontSize:12,borderColor:T.gold,color:T.gold}}>
-            🔄 Re-tirer les confrontations (nouveau tirage aléatoire)</button>}
-          {g.type==="event"&&g.subtype!=="coupe"&&<TeamManager g={g} renameTeam={renameTeam} setTeam={setTeam}/>}
+          {/* tirage : visible tant que les équipes ne sont pas formées */}
+          {g.subtype==="ryder"&&!g.done&&!teamsFormed&&<DrawHats g={g} onAssign={applyDraw}/>}
+          {/* équipes & confrontations : REPLIÉ par défaut (n'encombre plus l'onglet Score) */}
+          {g.type==="event"&&g.subtype!=="coupe"&&teamsFormed&&!g.done&&(
+            <div style={{...card(T.line),marginBottom:12}}>
+              <button onClick={()=>setShowSetup(s=>!s)} style={{background:"none",border:"none",
+                color:T.text,fontWeight:800,fontSize:13,cursor:"pointer",width:"100%",
+                textAlign:"left",padding:0,display:"flex",justifyContent:"space-between"}}>
+                <span>⚙️ Équipes & confrontations</span><span style={{color:T.dim}}>{showSetup?"▲":"▼ modifier"}</span></button>
+              {showSetup&&<div style={{marginTop:10}}>
+                {(g.hats||[]).length>0&&<button onClick={regenConfrontations}
+                  style={{...delBtn,width:"100%",marginBottom:10,fontSize:12,borderColor:T.gold,color:T.gold}}>
+                  🔄 Re-tirer les confrontations (nouveau tirage aléatoire)</button>}
+                <TeamManager g={g} renameTeam={renameTeam} setTeam={setTeam}/>
+              </div>}
+            </div>)}
           {!isTournament && (g.roster||[]).length>4 && !g.done && <ReconfigPanel g={g} save={save}/>}
         </>;
         const validateBtn=<button onClick={toggleDone} style={{...addBtn,background:g.done?T.line:T.accent,
