@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, deleteGameByDataId, dedupeGamesC
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.58 · reconfig après création"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.59 · scoring une partie à la fois"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -2451,7 +2451,11 @@ function GameDetail({g,members,courses,games,setGames,back}){
         const iPlay=allSubs.some(isMine);
         const multi=allSubs.length>1;
         const focus=!g.done&&!showAll&&iPlay;        // mode "ma partie seulement"
-        const keep=list=>focus?list.filter(isMine):list;
+        // On n'affiche QUE LA PROCHAINE partie où je joue : la 1re pas encore complète (18 trous).
+        // Dès qu'elle est validée, la suivante (où je suis) apparaît automatiquement.
+        const mySubs=allSubs.filter(isMine);
+        const current=mySubs.find(sg=>!subComplete(sg))||mySubs[mySubs.length-1];
+        const keep=list=>focus?list.filter(sg=>sg===current):list;
         return <>
         {g.subtype==="ryder"&&<DrawHats g={g} onAssign={applyDraw}/>}
         {g.subtype==="ryder"&&(g.hats||[]).length>0&&!g.done&&<button onClick={regenConfrontations}
