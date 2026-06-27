@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, deleteGameByDataId, dedupeGamesC
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.57 · configurations multi-parties"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.58 · reconfig après création"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -2289,6 +2289,56 @@ function ScorerPicker({sg,label,players,scorerId,canEdit,myId,onPick,playerById}
   );
 }
 
+// Reconfigurer une amicale à >4 joueurs APRÈS création (ex. passer de 2+4 à 3+3),
+// tant qu'aucun score n'est saisi. Choix de la config + formules + affectation des joueurs.
+function ReconfigPanel({g,save}){
+  const roster=g.roster||[];
+  const hasScores=(g.subgames||[]).some(sg=>Object.values(sg.scores||{})
+    .some(h=>h&&Object.keys(h).length));
+  const [openP,setOpenP]=useState(false);
+  const [sizes,setSizes]=useState((g.subgames||[]).map(sg=>(sg.players||[]).length));
+  const [formulas,setFormulas]=useState((g.subgames||[]).map(sg=>sg.formula));
+  const seqMap=ss=>{const m={};let i=0;ss.forEach((sz,gi)=>{for(let k=0;k<sz;k++){const p=roster[i++];if(p)m[p.id]=gi;}});return m;};
+  const [flightOf,setFlightOf]=useState(()=>{const m={};(g.subgames||[]).forEach((sg,gi)=>(sg.players||[]).forEach(id=>m[id]=gi));return m;});
+  const flightOfP=id=>flightOf[id]??0;
+  const cnt=gi=>roster.filter(p=>flightOfP(p.id)===gi).length;
+  const pick=ns=>{setSizes(ns);setFormulas(ns.map((s,i)=>sizes[i]===s?formulas[i]:defaultFormula(s)));setFlightOf(seqMap(ns));};
+  const setF=(gi,val)=>setFormulas(formulas.map((x,k)=>k===gi?val:x));
+  const apply=()=>{
+    const bad=sizes.findIndex((sz,gi)=>cnt(gi)!==sz);
+    if(bad>=0) return alert(`La partie ${bad+1} doit compter ${sizes[bad]} joueurs (actuellement ${cnt(bad)}).`);
+    const subgames=sizes.map((sz,gi)=>({id:gi+1,formula:formulas[gi]||defaultFormula(sz),
+      players:roster.filter(p=>flightOfP(p.id)===gi).map(p=>p.id),
+      scores:{},validated:[],done:false,hcpRelative:g.hcpRelative}));
+    save({...g,subgames,teamNames:null}); setOpenP(false);
+  };
+  const n=roster.length;
+  return (<div style={{...card(T.violet),marginBottom:12}}>
+    <button onClick={()=>setOpenP(o=>!o)} style={{background:"none",border:"none",color:T.violet,
+      fontWeight:800,fontSize:13,cursor:"pointer",width:"100%",textAlign:"left",padding:0}}>
+      ⚙️ Reconfigurer les parties (ex. 3+3 au lieu de 2+4) {openP?"▲":"▼"}</button>
+    {openP&&(hasScores
+      ? <div style={{fontSize:12,color:T.gold,marginTop:8}}>⚠️ Des scores sont déjà saisis : impossible de reconfigurer sans les perdre. Rouvre une nouvelle partie si besoin.</div>
+      : <div style={{marginTop:10}}>
+          <ConfigPicker n={n} current={sizes.map(s=>({size:s}))} onPick={pick}/>
+          {sizes.map((sz,gi)=>(<div key={gi} style={{marginBottom:6}}>
+            <div style={{fontSize:11,color:cnt(gi)===sz?T.dim:T.gold}}>Partie {gi+1} · {sz} joueurs ({cnt(gi)}/{sz})</div>
+            <select value={formulas[gi]||defaultFormula(sz)} onChange={e=>setF(gi,e.target.value)} style={{...inp,marginTop:2}}>
+              {formulasFor(sz).map(f=><option key={f} value={f}>{FORMULA_LABELS[f]}</option>)}</select>
+          </div>))}
+          <div style={{fontSize:11,color:T.dim,margin:"6px 0 4px"}}>Affecte les joueurs (tape pour déplacer) :</div>
+          {roster.map(p=>(<div key={p.id} style={{display:"flex",alignItems:"center",gap:6,marginBottom:5}}>
+            <span style={{flex:1,minWidth:0,fontWeight:700,fontSize:13,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{dispName(p)}</span>
+            <div style={{display:"flex",gap:4,flexShrink:0}}>
+              {sizes.map((sz,gi)=>{const act=flightOfP(p.id)===gi;
+                return <button key={gi} onClick={()=>setFlightOf(o=>({...o,[p.id]:gi}))}
+                  style={{...chip,padding:"5px 9px",fontSize:12,border:`2px solid ${act?T.accent:T.line}`,
+                  background:act?T.panel2:T.panel,color:act?T.text:T.dim,fontWeight:act?800:600}}>P{gi+1}</button>;})}
+            </div></div>))}
+          <button onClick={apply} style={{...addBtn,marginTop:8}}>✅ Appliquer la configuration</button>
+        </div>)}
+  </div>);
+}
 function GameDetail({g,members,courses,games,setGames,back}){
   const {user}=useContext(Ctx);
   const isTournament=!!g.rounds;
@@ -2421,6 +2471,9 @@ function GameDetail({g,members,courses,games,setGames,back}){
         {g.subtype==="coupe"&&!g.done&&g.rounds?.length>0&&nextCoupeRound(g,courses)&&
           <button onClick={advanceCoupe} style={{...addBtn,marginBottom:12,
             background:T.gold,color:"#1a1200"}}>▶️ Valider et générer le tour suivant</button>}
+
+        {!isTournament && (g.roster||[]).length>4 && !g.done &&
+          <ReconfigPanel g={g} save={save}/>}
 
         {multi&&iPlay&&!g.done&&<button onClick={()=>setShowAll(s=>!s)}
           style={{...delBtn,width:"100%",marginBottom:12,fontSize:12,
