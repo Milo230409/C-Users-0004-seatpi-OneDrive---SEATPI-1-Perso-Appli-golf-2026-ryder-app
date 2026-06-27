@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, deleteGameByDataId, dedupeGamesC
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.61 · coups rendus par partie"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.62 · navigation par partie"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -2361,6 +2361,7 @@ function GameDetail({g,members,courses,games,setGames,back}){
   const isMine=sg=>(sg.players||[]).some(id=>String(id)===String(myId))
     ||String(scorerOf(sg))===String(myId);
   const [showAll,setShowAll]=useState(false);
+  const [openMatch,setOpenMatch]=useState(undefined); // undefined=auto(ma partie) · null=liste · "clé"=une partie
   const setTeam=(pid,team)=>save({...g,roster:g.roster.map(p=>p.id===pid?{...p,team}:p)});
   // Tirage appliqué : équipes + chapeaux + PROPOSITION de confrontations par manche
   const applyDraw=({assign,hats})=>{
@@ -2448,100 +2449,116 @@ function GameDetail({g,members,courses,games,setGames,back}){
       })()}
 
       {view==="score" && (()=>{
-        // n'afficher que la partie où je suis (sauf si terminé ou si je déplie tout).
-        // Si je ne joue dans aucune partie (organisateur/spectateur), on montre tout.
         const allSubs=isTournament?g.rounds.flatMap(r=>r.subgames):(g.subgames||[]);
-        const iPlay=allSubs.some(isMine);
-        const multi=allSubs.length>1;
-        const focus=!g.done&&!showAll&&iPlay;        // mode "ma partie seulement"
-        // On n'affiche QUE LA PROCHAINE partie où je joue : la 1re pas encore complète (18 trous).
-        // Dès qu'elle est validée, la suivante (où je suis) apparaît automatiquement.
-        const mySubs=allSubs.filter(isMine);
-        const current=mySubs.find(sg=>!subComplete(sg))||mySubs[mySubs.length-1];
-        const keep=list=>focus?list.filter(sg=>sg===current):list;
-        return <>
-        {/* tirage des équipes : visible UNIQUEMENT tant que les équipes ne sont pas formées */}
-        {g.subtype==="ryder"&&!g.done&&!g.roster.some(p=>p.team===0||p.team===1)&&<DrawHats g={g} onAssign={applyDraw}/>}
-        {g.subtype==="ryder"&&(g.hats||[]).length>0&&!g.done&&<button onClick={regenConfrontations}
-          style={{...delBtn,width:"100%",marginBottom:12,fontSize:12,borderColor:T.gold,color:T.gold}}>
-          🔄 Re-tirer les confrontations (nouveau tirage aléatoire)</button>}
-        {g.type==="event"&&g.subtype!=="coupe"&&<TeamManager g={g} renameTeam={renameTeam} setTeam={setTeam}/>}
-        {g.subtype==="coupe"&&(!g.rounds||!g.rounds.length)&&!g.done&&(
-          <div style={{...card(T.gold),marginBottom:12,textAlign:"center"}}>
-            <div style={{fontWeight:800,marginBottom:4}}>🏆 MiniCup · {FORMULA_SHORT[g.coupeFormula]||"Match Play"}</div>
-            <div style={{fontSize:11,color:T.dim,marginBottom:10}}>
-              {g.roster?.length} joueurs · tirage aléatoire en 1v1 (élimination directe).</div>
-            <button onClick={launchCoupe} style={{...addBtn,margin:0,
-              background:`linear-gradient(90deg,${T.eu},${T.us})`,color:"#fff"}}>🎲 LANCER LE TIRAGE</button>
-          </div>)}
-        {g.subtype==="coupe"&&g.rounds?.length>0&&
-          <BracketBoard g={g} courses={courses} playerById={playerById}/>}
-        {g.subtype==="coupe"&&!g.done&&g.rounds?.length>0&&nextCoupeRound(g,courses)&&
-          <button onClick={advanceCoupe} style={{...addBtn,marginBottom:12,
-            background:T.gold,color:"#1a1200"}}>▶️ Valider et générer le tour suivant</button>}
+        // Liste des PARTIES (sous-parties), chacune avec sa clé / son parcours / sa manche.
+        const matches=isTournament
+          ? g.rounds.flatMap(r=>r.subgames.map(sg=>({key:`${r.id}.${sg.id}`,sg,rid:r.id,
+              rc:courses.find(c=>c.id===r.courseId),
+              label:`Manche ${r.id}${r.subgames.length>1?` · Partie ${r.subgames.indexOf(sg)+1}`:""}`})))
+          : (g.subgames||[]).map((sg,i)=>({key:`${sg.id}`,sg,rid:null,rc:refCourse,
+              label:g.subgames.length>1?`Partie ${i+1}`:"La partie"}));
+        const useList = matches.length>1 && g.subtype!=="coupe";
+        // rendu épuré de la SAISIE d'une partie (formule + scoreur + grille)
+        const renderScoring=(m)=>{const {sg,rid,rc}=m;
+          const setF = rid!=null ? v=>setSubFormula(rid,sg.id,v) : v=>setSubFormulaSimple(sg.id,v);
+          const setSc = rid!=null ? (sid,pid,h,v)=>setScoreRound(rid,sid,pid,h,v) : setScoreSimple;
+          const valH = rid!=null ? (sid,h)=>toggleHoleRound(rid,sid,h) : toggleHoleSimple;
+          const setScr = rid!=null ? pid=>setScorerRound(rid,sg.id,pid) : pid=>setScorerSimple(sg.id,pid);
+          return (<div key={m.key}>
+            {!g.done&&(sg.validated||[]).length===0&&<div style={{...card(T.eu),marginBottom:8}}>
+              <div style={{fontSize:10,color:T.dim,marginBottom:4,textTransform:"uppercase",
+                letterSpacing:.5,fontWeight:700}}>🎲 Formule (modifiable avant le 1er trou)</div>
+              <select value={sg.formula} onChange={e=>setF(e.target.value)} style={{...inp,marginTop:0}}>
+                {formulasFor(sg.players.length).map(f=><option key={f} value={f}>{FORMULA_LABELS[f]}</option>)}</select></div>}
+            {!g.done&&<ScorerPicker sg={sg} label={null} scorerId={scorerOf(sg)} canEdit={canEditSub(sg)} myId={myId}
+              players={sg.players.map(playerById).filter(Boolean)} onPick={setScr} playerById={playerById}/>}
+            <SubGame sg={sg} course={rc} mode={g.mode} playerById={playerById}
+              setScore={setSc} validateHole={valH} done={g.done||!canEditSub(sg)}/>
+          </div>);};
+        // bandeau de contrôles (tirage, équipes, reconfig) — niveau « vue d'ensemble »
+        const overview=<>
+          {g.subtype==="ryder"&&!g.done&&!g.roster.some(p=>p.team===0||p.team===1)&&<DrawHats g={g} onAssign={applyDraw}/>}
+          {g.subtype==="ryder"&&(g.hats||[]).length>0&&!g.done&&<button onClick={regenConfrontations}
+            style={{...delBtn,width:"100%",marginBottom:12,fontSize:12,borderColor:T.gold,color:T.gold}}>
+            🔄 Re-tirer les confrontations (nouveau tirage aléatoire)</button>}
+          {g.type==="event"&&g.subtype!=="coupe"&&<TeamManager g={g} renameTeam={renameTeam} setTeam={setTeam}/>}
+          {!isTournament && (g.roster||[]).length>4 && !g.done && <ReconfigPanel g={g} save={save}/>}
+        </>;
+        const validateBtn=<button onClick={toggleDone} style={{...addBtn,background:g.done?T.line:T.accent,
+          color:g.done?T.text:"#04150b"}}>{g.done?"↩ Rouvrir":"✅ Valider (révéler résultats)"}</button>;
+        const boards=<>
+          {g.subtype==="ryder"&&<RyderBoard g={g} courses={courses} playerById={playerById}/>}
+          {g.type==="event"&&g.subtype!=="ryder"&&g.subtype!=="coupe"&&g.done&&<EventBoard g={g} courses={courses} playerById={playerById}/>}
+          {g.done&&<ShareResults g={g} courses={courses} playerById={playerById}/>}
+        </>;
 
-        {!isTournament && (g.roster||[]).length>4 && !g.done &&
-          <ReconfigPanel g={g} save={save}/>}
+        // ===== COUPE : flux bracket existant + saisie de ma partie courante =====
+        if(g.subtype==="coupe"){
+          const mine=allSubs.filter(isMine);const cur=mine.find(sg=>!subComplete(sg))||mine[mine.length-1];
+          const m=matches.find(x=>x.sg===cur);
+          return <>
+            {(!g.rounds||!g.rounds.length)&&!g.done&&(
+              <div style={{...card(T.gold),marginBottom:12,textAlign:"center"}}>
+                <div style={{fontWeight:800,marginBottom:4}}>🏆 MiniCup · {FORMULA_SHORT[g.coupeFormula]||"Match Play"}</div>
+                <div style={{fontSize:11,color:T.dim,marginBottom:10}}>
+                  {g.roster?.length} joueurs · tirage aléatoire en 1v1 (élimination directe).</div>
+                <button onClick={launchCoupe} style={{...addBtn,margin:0,
+                  background:`linear-gradient(90deg,${T.eu},${T.us})`,color:"#fff"}}>🎲 LANCER LE TIRAGE</button>
+              </div>)}
+            {g.rounds?.length>0&&<BracketBoard g={g} courses={courses} playerById={playerById}/>}
+            {!g.done&&g.rounds?.length>0&&nextCoupeRound(g,courses)&&
+              <button onClick={advanceCoupe} style={{...addBtn,marginBottom:12,
+                background:T.gold,color:"#1a1200"}}>▶️ Valider et générer le tour suivant</button>}
+            {m&&renderScoring(m)}
+            {validateBtn}{boards}
+          </>;
+        }
 
-        {multi&&iPlay&&!g.done&&<button onClick={()=>setShowAll(s=>!s)}
-          style={{...delBtn,width:"100%",marginBottom:12,fontSize:12,
-            borderColor:T.violet,color:T.violet}}>
-          {showAll?"👁️ N'afficher que ma partie":"👁️ Voir toutes les parties"}</button>}
-
-        {isTournament ? g.rounds.map(r=>{
-          const rc=courses.find(c=>c.id===r.courseId);
-          const subs=keep(r.subgames);
-          if(!subs.length) return null;            // manche où je ne joue pas : masquée
-          return (
-            <div key={r.id} style={{marginBottom:18}}>
-              <div style={{fontFamily:"Anton",fontSize:16,margin:"6px 0",
-                display:"flex",alignItems:"center",gap:8}}>
-                <span style={{background:T.gold,color:"#1a1200",borderRadius:6,
-                  padding:"2px 8px",fontSize:13}}>MANCHE {r.id}</span>
-                {rc?.name}</div>
-              {subs.map(sg=>{const num=r.subgames.indexOf(sg)+1;return (<div key={sg.id}>
-                {!g.done&&g.subtype!=="coupe"&&(sg.validated||[]).length===0&&<div style={{display:"flex",
-                  alignItems:"center",gap:6,margin:"4px 0"}}>
-                  <span style={{fontSize:10,color:T.dim}}>Formule {r.subgames.length>1?`· P${num}`:""}</span>
-                  <select value={sg.formula} onChange={e=>setSubFormula(r.id,sg.id,e.target.value)}
-                    style={{...inp,marginTop:0,fontSize:12,padding:"6px 8px",flex:1}}>
-                    {formulasFor(sg.players.length).map(f=>
-                      <option key={f} value={f}>{FORMULA_LABELS[f]}</option>)}</select></div>}
-                {!g.done&&<ScorerPicker sg={sg} label={r.subgames.length>1?`Partie ${num}`:null}
-                  scorerId={scorerOf(sg)} canEdit={canEditSub(sg)} myId={myId}
-                  players={sg.players.map(playerById).filter(Boolean)}
-                  onPick={pid=>setScorerRound(r.id,sg.id,pid)} playerById={playerById}/>}
-                <SubGame sg={sg} course={rc} mode={g.mode} playerById={playerById}
-                  setScore={(sid,pid,h,v)=>setScoreRound(r.id,sid,pid,h,v)}
-                  validateHole={(sid,h)=>toggleHoleRound(r.id,sid,h)}
-                  done={g.done||!canEditSub(sg)}/>
+        // ===== MULTI-PARTIES : LISTE des parties ↔ DÉTAIL d'une partie =====
+        if(useList){
+          // tant que les équipes d'une Ryder ne sont pas tirées, on reste sur la liste (tirage visible)
+          const needsSetup = g.subtype==="ryder" && !g.roster.some(p=>p.team===0||p.team===1);
+          const myMatch=matches.find(m=>isMine(m.sg)&&!subComplete(m.sg))||matches.find(m=>isMine(m.sg));
+          const sel = openMatch!==undefined ? openMatch : (needsSetup ? null : (myMatch?myMatch.key:null));
+          const openM = matches.find(m=>m.key===sel);
+          if(openM){ // DÉTAIL d'une partie
+            return <>
+              <button onClick={()=>setOpenMatch(null)} style={{...delBtn,marginBottom:10}}>← Toutes les parties</button>
+              <div style={{fontFamily:"Anton",fontSize:16,marginBottom:8,display:"flex",
+                alignItems:"center",gap:8}}>
+                <span style={{background:T.gold,color:"#1a1200",borderRadius:6,padding:"2px 8px",fontSize:13}}>{openM.label}</span>
+                <span style={{fontSize:12,color:T.dim}}>{openM.rc?.name}</span></div>
+              {renderScoring(openM)}
+            </>;
+          }
+          // LISTE des parties + scoreboard
+          return <>
+            {overview}
+            <Section>Parties ({matches.length})</Section>
+            {matches.map(m=>{
+              const complete=subComplete(m.sg),started=(m.sg.validated||[]).length>0;
+              const st=complete?{t:"✅ Terminé",c:T.accent}:started?{t:"⏳ En cours",c:T.gold}:{t:"À venir",c:T.dim};
+              const ps=m.sg.players.map(playerById).filter(Boolean);
+              const res=started?computeSub(m.sg,ps,m.rc,g.mode==="net"):null;
+              return (<div key={m.key} onClick={()=>setOpenMatch(m.key)}
+                style={{...card(st.c),cursor:"pointer",display:"flex",flexDirection:"column",gap:3}}>
+                <div style={{display:"flex",justifyContent:"space-between",gap:8,alignItems:"center"}}>
+                  <span style={{fontWeight:800,fontSize:13}}>{m.label} · {FORMULA_SHORT[m.sg.formula]||m.sg.formula}
+                    {isMine(m.sg)&&<span style={{fontSize:9,color:T.accent,border:`1px solid ${T.accent}`,
+                      borderRadius:6,padding:"1px 5px",marginLeft:6}}>TOI</span>}</span>
+                  <span style={{fontSize:11,color:st.c,fontWeight:700,flexShrink:0}}>{st.t}</span></div>
+                <div style={{fontSize:11,color:T.dim,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
+                  {ps.map(dispName).join(" · ")}</div>
+                {res&&<div style={{fontSize:12,color:T.text,fontWeight:700}}>{res.summary}</div>}
+                {!g.done&&<div style={{fontSize:10,color:T.accent}}>tap pour {complete?"revoir":"saisir"} →</div>}
               </div>);})}
-            </div>
-          );
-        }) : keep(g.subgames).map(sg=>{const num=g.subgames.indexOf(sg)+1;return (<div key={sg.id}>
-          {!g.done&&(sg.validated||[]).length===0&&<div style={{...card(T.eu),marginBottom:8}}>
-            <div style={{fontSize:10,color:T.dim,marginBottom:4,textTransform:"uppercase",
-              letterSpacing:.5,fontWeight:700}}>🎲 Formule {g.subgames.length>1?`· Partie ${num}`:""} (modifiable avant le 1er trou)</div>
-            <select value={sg.formula} onChange={e=>setSubFormulaSimple(sg.id,e.target.value)}
-              style={{...inp,marginTop:0}}>
-              {formulasFor(sg.players.length).map(f=>
-                <option key={f} value={f}>{FORMULA_LABELS[f]}</option>)}</select></div>}
-          {!g.done&&<ScorerPicker sg={sg} label={g.subgames.length>1?`Partie ${num}`:null}
-            scorerId={scorerOf(sg)} canEdit={canEditSub(sg)} myId={myId}
-            players={sg.players.map(playerById).filter(Boolean)}
-            onPick={pid=>setScorerSimple(sg.id,pid)} playerById={playerById}/>}
-          <SubGame sg={sg} course={refCourse} mode={g.mode}
-            playerById={playerById} setScore={setScoreSimple}
-            validateHole={toggleHoleSimple} done={g.done||!canEditSub(sg)}/>
-        </div>);})}
+            {validateBtn}{boards}
+          </>;
+        }
 
-        <button onClick={toggleDone} style={{...addBtn,background:g.done?T.line:T.accent,
-          color:g.done?T.text:"#04150b"}}>
-          {g.done?"↩ Rouvrir":"✅ Valider (révéler résultats)"}</button>
-        {g.subtype==="ryder"&&<RyderBoard g={g} courses={courses} playerById={playerById}/>}
-        {g.type==="event"&&g.subtype!=="ryder"&&g.subtype!=="coupe"&&g.done&&<EventBoard g={g} courses={courses} playerById={playerById}/>}
-        {g.done&&<ShareResults g={g} courses={courses} playerById={playerById}/>}
-      </>;})()}
+        // ===== PARTIE SIMPLE (1 flight) : saisie directe =====
+        return <>{overview}{matches.map(m=>renderScoring(m))}{validateBtn}{boards}</>;
+      })()}
     </div>
   );
 }
