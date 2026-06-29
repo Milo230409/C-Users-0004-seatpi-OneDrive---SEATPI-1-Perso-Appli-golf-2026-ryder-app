@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, deleteGameByDataId, dedupeGamesC
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.66 · Ryder démo 3+5"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.67 · vainqueurs Ryder en tête"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -634,11 +634,12 @@ function WhoAreYou({members,loaded,cloud,games,courses,onPick,setMembers}){
   // Membres G&A = les joueurs préchargés (toujours en haut) ; les autres en dessous.
   const isMember=p=>p.member===true||/^seed-/.test(String(p.id));
   const isWinner=p=>winners.has(String(p.id));
-  // Ordre : gagnants de la dernière Ryder ⭐ d'abord, puis « Passe Partout », puis alpha (tri stable).
+  // Vainqueurs de la dernière Ryder ⭐ : groupe à part, tout en haut (membre OU invité).
   const pinTop=p=>/passe.?partout/i.test(dispName(p));
-  const rank=p=>isWinner(p)?0:pinTop(p)?1:2;
-  const founders=[...list.filter(isMember)].sort((a,b)=>rank(a)-rank(b));
-  const others=list.filter(p=>!isMember(p));
+  const winnersList=list.filter(isWinner).sort((a,b)=>dispName(a).localeCompare(dispName(b)));
+  const founders=list.filter(p=>isMember(p)&&!isWinner(p))
+    .sort((a,b)=>(pinTop(a)===pinTop(b))?0:pinTop(a)?-1:1);
+  const others=list.filter(p=>!isMember(p)&&!isWinner(p));
   const playerBtn=p=>{const win=isWinner(p);const nb=wins[String(p.id)]||0;return (
     <button key={p.id} onClick={()=>choose(p)} style={{display:"flex",alignItems:"center",
       gap:12,padding:"14px 16px",borderRadius:14,
@@ -706,6 +707,10 @@ function WhoAreYou({members,loaded,cloud,games,courses,onPick,setMembers}){
         padding:"16px",background:T.panel,borderRadius:12,textAlign:"left",lineHeight:1.5}}>
         Aucun joueur enregistré pour l'instant. Ajoute-toi ci-dessous.</div>}
 
+      {loaded && winnersList.length>0 && <>
+        <div style={{...sectionLabel,color:T.gold}}>⭐ Vainqueurs de la dernière Ryder</div>
+        <div style={{display:"flex",flexDirection:"column",gap:8}}>{winnersList.map(playerBtn)}</div>
+      </>}
       {loaded && founders.length>0 && <>
         <div style={sectionLabel}>★ Membres G&A</div>
         <div style={{display:"flex",flexDirection:"column",gap:8}}>{founders.map(playerBtn)}</div>
