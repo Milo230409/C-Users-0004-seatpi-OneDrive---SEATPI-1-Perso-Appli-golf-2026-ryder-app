@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, deleteGameByDataId, dedupeGamesC
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.71 · prime participation invités"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.72 · prime membres seulement"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -1710,10 +1710,9 @@ function computeStandings(done, courses){
       });
       const champ=teamWins[0]>teamWins[1]?0:teamWins[1]>teamWins[0]?1:null;
       if(champ!=null) g.roster.forEach(p=>{ if(p.team===champ&&isMember(p)&&S[p.id]){ S[p.id].pts+=5; gp[p.id]=(gp[p.id]||0)+5; } });
-      // PRIME DE PARTICIPATION : TOUT joueur présent dans une équipe (membre OU invité) qui
-      // finit à 0 repart avec 1 point — il mérite plus que ceux qui ne sont pas venus (0).
-      g.roster.forEach(p=>{ if(p.team!==0&&p.team!==1) return;
-        if((gp[p.id]||0)>0) return; ensure(p.id).pts+=1; gp[p.id]=1; });
+      // PRIME DE PARTICIPATION : un MEMBRE présent qui a tout perdu repart avec 1 point
+      // (il mérite plus que ceux qui ne sont pas venus = 0). Les invités ne marquent jamais.
+      Object.keys(gp).forEach(id=>{ if(gp[id]===0 && S[id]){ S[id].pts+=1; gp[id]=1; } });
       Object.entries(gp).forEach(([id,pt])=>detail(id,g.id,g.name,pt));
       return;
     }
