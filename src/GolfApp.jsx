@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, deleteGameByDataId, dedupeGamesC
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.64 · score épuré (équipes repliées)"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.65 · Ryder gagnées + accueil"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -524,7 +524,7 @@ export default function App(){
     const stale=courses.filter(c=>c.source==="api"&&c.apiId&&(now-(c.updated||0))>SIX);
     setStaleCount(stale.length);},[courses,user]);
   if(!user) return <WhoAreYou members={members} loaded={loaded} cloud={cloud}
-    setMembers={saveMembers} onPick={setUser}/>;
+    games={games} courses={courses} setMembers={saveMembers} onPick={setUser}/>;
   const LOGIN_ENABLED=true;
   // rafraîchit tous les parcours API périmés (sur action de l'utilisateur)
   const refreshStale=async()=>{
@@ -620,37 +620,44 @@ function SoftLogin({player,onOk,onCancel}){
   );
 }
 
-function WhoAreYou({members,loaded,cloud,onPick,setMembers}){
+function WhoAreYou({members,loaded,cloud,games,courses,onPick,setMembers}){
   const [adding,setAdding]=useState(false);
   const [profileFor,setProfileFor]=useState(null); // joueur dont on complète la fiche
   const [verifyFor,setVerifyFor]=useState(null);   // joueur en reconnexion
   const [nm,setNm]=useState("");
+  // Gagnants de la dernière Ryder (mis en avant) + nb de Ryder gagnées par joueur.
+  const winners=useMemo(()=>lastRyderWinners(games,courses),[games,courses]);
+  const wins=useMemo(()=>ryderWinsMap(games,courses),[games,courses]);
   // on n'affiche QUE les vrais profils : un invité jamais nommé n'est pas archivé/listé
   const realName=p=>p.name&&p.name.trim()&&p.name.trim().toLowerCase()!=="invité";
   const list=members.filter(realName).sort((a,b)=>dispName(a).localeCompare(dispName(b)));
   // Membres G&A = les joueurs préchargés (toujours en haut) ; les autres en dessous.
   const isMember=p=>p.member===true||/^seed-/.test(String(p.id));
-  // « Passe Partout » épinglé tout en haut (l'organisateur se connecte 50× / jour) ;
-  // les autres membres restent par ordre alphabétique (tri stable).
+  const isWinner=p=>winners.has(String(p.id));
+  // Ordre : gagnants de la dernière Ryder ⭐ d'abord, puis « Passe Partout », puis alpha (tri stable).
   const pinTop=p=>/passe.?partout/i.test(dispName(p));
-  const founders=[...list.filter(isMember)].sort((a,b)=>(pinTop(a)===pinTop(b))?0:pinTop(a)?-1:1);
+  const rank=p=>isWinner(p)?0:pinTop(p)?1:2;
+  const founders=[...list.filter(isMember)].sort((a,b)=>rank(a)-rank(b));
   const others=list.filter(p=>!isMember(p));
-  const playerBtn=p=>(
+  const playerBtn=p=>{const win=isWinner(p);const nb=wins[String(p.id)]||0;return (
     <button key={p.id} onClick={()=>choose(p)} style={{display:"flex",alignItems:"center",
-      gap:12,padding:"14px 16px",borderRadius:14,border:`1.5px solid ${T.line}`,
-      background:T.panel,cursor:"pointer",textAlign:"left",color:T.text}}>
-      <span style={{width:38,height:38,borderRadius:"50%",background:T.accent,
+      gap:12,padding:"14px 16px",borderRadius:14,
+      border:`1.5px solid ${win?T.gold:T.line}`,
+      background:win?`${T.gold}1a`:T.panel,cursor:"pointer",textAlign:"left",color:T.text}}>
+      <span style={{width:38,height:38,borderRadius:"50%",background:win?T.gold:T.accent,
         color:T.ink,display:"flex",alignItems:"center",justifyContent:"center",
         fontWeight:800,fontSize:16,flexShrink:0}}>
         {(dispName(p)[0]||"?").toUpperCase()}</span>
       <div style={{minWidth:0,flex:1}}>
-        <div style={{fontWeight:800,fontSize:16,color:T.text}}>{dispName(p)}</div>
+        <div style={{fontWeight:800,fontSize:16,color:T.text,display:"flex",alignItems:"center",gap:6}}>
+          {win&&<span title="Vainqueur de la dernière Ryder">⭐</span>}{dispName(p)}
+          {nb>0&&<span style={{fontSize:10,color:T.gold,fontWeight:700}}>🏆×{nb}</span>}</div>
         {p.name&&p.nick&&<div style={{fontSize:11,color:T.dim}}>{p.name}</div>}
       </div>
       {!p.profileDone&&<span style={{fontSize:10,color:T.gold,
         border:`1px solid ${T.gold}55`,borderRadius:999,padding:"2px 8px"}}>
         profil à compléter</span>}
-    </button>);
+    </button>);};
   const sectionLabel={fontSize:11,fontWeight:800,letterSpacing:1,textTransform:"uppercase",
     color:T.dim,margin:"14px 0 6px",textAlign:"left"};
 
@@ -793,8 +800,9 @@ function PrefRow({label,value,setValue,opts}){
 
 // "Mon compte" : chaque joueur met à jour SON profil (surnom, index, mobile, email, notif).
 function AccountTab(){
-  const {user,setUser,members,setMembers}=useContext(Ctx);
+  const {user,setUser,members,setMembers,games,courses}=useContext(Ctx);
   const me=members.find(m=>String(m.id)===String(user?.id))||user||{};
+  const myRyderWins=ryderWinsMap(games,courses)[String(user?.id)]||0;
   const [name,setName]=useState(me.name||"");
   const [nick,setNick]=useState(me.nick||"");
   const [mobile,setMobile]=useState(me.mobile||"");
@@ -816,6 +824,9 @@ function AccountTab(){
   return (
     <div>
       <Section>Mon compte</Section>
+      <div style={{...card(T.gold),display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+        <span style={{fontWeight:800,fontSize:13}}>🏆 Ryder Cups gagnées</span>
+        <span style={{fontFamily:"Anton",fontSize:24,color:T.gold}}>{myRyderWins}</span></div>
       <div style={{...card(T.gold),fontSize:12,color:T.dim,lineHeight:1.5}}>
         Mets à jour tes infos quand tu veux. Ton <b style={{color:T.text}}>index / niveau</b> sert
         uniquement à calculer tes <b style={{color:T.text}}>coups rendus</b> : tiens-le à jour
@@ -1758,6 +1769,36 @@ function seasonImpact(g, games, courses){
   return {lines,counted};
 }
 
+// ===== RYDER : équipe gagnante, compteur de Ryder gagnées par joueur =====
+// Équipe gagnante d'une Ryder (0/1) = celle qui remporte le + de matchs. null si indéterminé.
+function ryderWinningTeam(g,courses){
+  if(g?.subtype!=="ryder"||!g.rounds) return null;
+  const net=g.mode==="net";const teamWins=[0,0];
+  g.rounds.forEach(r=>{const course=(courses||[]).find(c=>c.id===r.courseId);
+    (r.subgames||[]).forEach(sg=>{ if(!subComplete(sg)) return;
+      const ps=sg.players.map(id=>(g.roster||[]).find(p=>p.id===id)).filter(Boolean);
+      const {pts}=playerScores(sg,ps,course,net);const ts=[0,0];
+      ps.forEach(p=>{if(p.team===0||p.team===1)ts[p.team]+=(pts[p.id]||0);});
+      const w=ts[0]>ts[1]?0:ts[1]>ts[0]?1:null; if(w!=null)teamWins[w]++; });});
+  return teamWins[0]>teamWins[1]?0:teamWins[1]>teamWins[0]?1:null;
+}
+// Nombre de Ryder gagnées par joueur (DÉRIVÉ de l'historique → se met à jour si on supprime).
+function ryderWinsMap(games,courses){
+  const map={};
+  (games||[]).filter(g=>g.subtype==="ryder"&&g.done&&!g.test).forEach(g=>{
+    const w=ryderWinningTeam(g,courses); if(w==null) return;
+    (g.roster||[]).forEach(p=>{ if(p.team===w) map[String(p.id)]=(map[String(p.id)]||0)+1; });});
+  return map;
+}
+// Gagnants de la Ryder la plus récente (Set d'ids) — pour la mise en avant sur l'accueil.
+function lastRyderWinners(games,courses){
+  const ryders=(games||[]).filter(g=>g.subtype==="ryder"&&g.done&&!g.test)
+    .sort((a,b)=>(b.created||0)-(a.created||0));
+  for(const g of ryders){const w=ryderWinningTeam(g,courses);
+    if(w!=null) return new Set((g.roster||[]).filter(p=>p.team===w).map(p=>String(p.id)));}
+  return new Set();
+}
+
 function Championship(){
   const {games,members,courses}=useContext(Ctx);
   const done=games.filter(g=>g.done);
@@ -2220,6 +2261,28 @@ function makeTestGames(members,courses){
     mk(5,"mexicaine",4,"gross",true),
   ];
 }
+// Crée une Ryder déjà jouée gagnée par l'équipe 1 (Rory + Scottie + Passe Partout) contre
+// (Fortnite + Trichatard + JiP). Cherche les joueurs par prénom/surnom dans la liste.
+function makeRyderDemo(members,courses){
+  const co=courses.find(c=>/Nans/i.test(c.name||""))||courses[0];
+  const find=re=>members.find(m=>re.test(m.nick||"")||re.test(m.name||""));
+  const d0=[/rory/i,/scottie/i,/passe.?partout/i], d1=[/fortnite/i,/trichatard/i,/jip|jean.?p/i];
+  const t0=d0.map(find), t1=d1.map(find);
+  const miss=[...d0,...d1].filter((re,i)=>![...t0,...t1][i]).map(re=>re.source);
+  if(miss.length) return {error:miss.join(", ")};
+  const mk=(p,team)=>({id:p.id,name:p.name,nick:p.nick||"",member:true,
+    index:(p.index&&p.index>0)?p.index:18,tee:"Jaune",team});
+  const roster=[...t0.map(p=>mk(p,0)),...t1.map(p=>mk(p,1))];
+  const full=v=>{const o={};for(let h=0;h<18;h++)o[h]=v;return o;};
+  // 3 matchs 1v1 (Éq0 vs Éq1) : Éq0 score 3 partout, Éq1 score 6 → Éq0 gagne nettement.
+  const subgames=[0,1,2].map(i=>({id:i+1,formula:"matchplay",players:[t0[i].id,t1[i].id],
+    scores:{[t0[i].id]:full(3),[t1[i].id]:full(6)},
+    validated:Array.from({length:18},(_,k)=>k),done:true,hcpRelative:false}));
+  const t=Date.now();
+  return {game:{id:t,name:"🏆 Ryder Cup",type:"event",subtype:"ryder",mode:"net",roster,
+    teamNames:["Les Winner","Les Gentils"],hats:[],hcpRelative:false,done:true,created:t,
+    rounds:[{id:1,courseId:co?.id,courseName:co?.name||"Parcours",subgames,done:true}]}};
+}
 function History({openId,onConsumeOpen}){
   const {user,games,setGames,members,courses,removeGame,admin,cloud,cleanupDuplicates,clearAllGames}=useContext(Ctx);
   const [open,setOpen]=useState(openId||null);
@@ -2232,6 +2295,12 @@ function History({openId,onConsumeOpen}){
     if(!demos.length) return alert("Il faut au moins 4 joueurs préchargés pour générer les parties de test.");
     if(!confirm("Charger 5 parties de TEST (match play, chouette, stableford, fourball, mexicaine) déjà jouées ?\nElles sont marquées 🧪 TEST et ne comptent pas au classement.")) return;
     setGames([...demos,...games]); setScope("all");
+  };
+  const addRyder=()=>{
+    const r=makeRyderDemo(members,courses);
+    if(r.error) return alert("Joueurs introuvables : "+r.error+".\nVérifie que Rory, Scottie, Passe Partout, Fortnite, Trichatard et JiP existent (prénom ou surnom).");
+    if(!confirm("Créer une Ryder gagnée par l'Équipe 1 (Rory + Scottie + Passe Partout) ?")) return;
+    setGames([r.game,...games]); setScope("all");
   };
   const doCleanup=async()=>{ setCleaning("…");
     const n=await cleanupDuplicates();
@@ -2265,6 +2334,8 @@ function History({openId,onConsumeOpen}){
     {admin&&<div style={{marginBottom:10,display:"flex",flexDirection:"column",gap:6}}>
       <button onClick={loadDemos} style={{...delBtn,width:"100%",fontSize:12,
         borderColor:T.violet,color:T.violet}}>🧪 Charger 5 parties de test (hors classement)</button>
+      <button onClick={addRyder} style={{...delBtn,width:"100%",fontSize:12,
+        borderColor:T.gold,color:T.gold}}>🏆 Créer une Ryder (Équipe 1 gagnante)</button>
       {cloud&&<button onClick={doCleanup} style={{...delBtn,width:"100%",fontSize:12,
         borderColor:T.gold,color:T.gold}}>🧹 Nettoyer les doublons (réparer le classement)</button>}
       {cleaning&&<div style={{fontSize:11,color:T.accent,textAlign:"center"}}>{cleaning}</div>}
