@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, deleteGameByDataId, dedupeGamesC
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.67 · vainqueurs Ryder en tête"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.68 · coupe vainqueurs Ryder"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -651,8 +651,8 @@ function WhoAreYou({members,loaded,cloud,games,courses,onPick,setMembers}){
         {(dispName(p)[0]||"?").toUpperCase()}</span>
       <div style={{minWidth:0,flex:1}}>
         <div style={{fontWeight:800,fontSize:16,color:T.text,display:"flex",alignItems:"center",gap:6}}>
-          {win&&<span title="Vainqueur de la dernière Ryder">⭐</span>}{dispName(p)}
-          {nb>0&&<span style={{fontSize:10,color:T.gold,fontWeight:700}}>🏆×{nb}</span>}</div>
+          {win&&<span title="Vainqueur de la dernière Ryder">🏆</span>}{dispName(p)}
+          {nb>0&&<span style={{fontSize:10,color:T.gold,fontWeight:700}}>×{nb}</span>}</div>
         {p.name&&p.nick&&<div style={{fontSize:11,color:T.dim}}>{p.name}</div>}
       </div>
       {!p.profileDone&&<span style={{fontSize:10,color:T.gold,
@@ -708,7 +708,7 @@ function WhoAreYou({members,loaded,cloud,games,courses,onPick,setMembers}){
         Aucun joueur enregistré pour l'instant. Ajoute-toi ci-dessous.</div>}
 
       {loaded && winnersList.length>0 && <>
-        <div style={{...sectionLabel,color:T.gold}}>⭐ Vainqueurs de la dernière Ryder</div>
+        <div style={{...sectionLabel,color:T.gold}}>🏆 Vainqueurs de la dernière Ryder</div>
         <div style={{display:"flex",flexDirection:"column",gap:8}}>{winnersList.map(playerBtn)}</div>
       </>}
       {loaded && founders.length>0 && <>
