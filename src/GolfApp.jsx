@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, deleteGameByDataId, dedupeGamesC
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.65 · Ryder gagnées + accueil"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.66 · Ryder démo 3+5"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -2274,10 +2274,12 @@ function makeRyderDemo(members,courses){
     index:(p.index&&p.index>0)?p.index:18,tee:"Jaune",team});
   const roster=[...t0.map(p=>mk(p,0)),...t1.map(p=>mk(p,1))];
   const full=v=>{const o={};for(let h=0;h<18;h++)o[h]=v;return o;};
-  // 3 matchs 1v1 (Éq0 vs Éq1) : Éq0 score 3 partout, Éq1 score 6 → Éq0 gagne nettement.
-  const subgames=[0,1,2].map(i=>({id:i+1,formula:"matchplay",players:[t0[i].id,t1[i].id],
-    scores:{[t0[i].id]:full(3),[t1[i].id]:full(6)},
-    validated:Array.from({length:18},(_,k)=>k),done:true,hcpRelative:false}));
+  // UN seul match décisif (Éq0 vs Éq1) : Éq0 = 3 partout, Éq1 = 6 → Éq0 gagne nettement.
+  // → solidarité : chaque gagnant +3 (la victoire), puis +5 (trophée champion) = 3+5 = 8.
+  const ids0=t0.map(p=>p.id), ids1=t1.map(p=>p.id);
+  const scores={}; ids0.forEach(id=>scores[id]=full(3)); ids1.forEach(id=>scores[id]=full(6));
+  const subgames=[{id:1,formula:"stableford",players:[...ids0,...ids1],scores,
+    validated:Array.from({length:18},(_,k)=>k),done:true,hcpRelative:false}];
   const t=Date.now();
   return {game:{id:t,name:"🏆 Ryder Cup",type:"event",subtype:"ryder",mode:"net",roster,
     teamNames:["Les Winner","Les Gentils"],hats:[],hcpRelative:false,done:true,created:t,
