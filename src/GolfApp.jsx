@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, deleteGameByDataId, dedupeGamesC
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.83 · Ryder = 1 partie (3 en moyenne)"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.84 · FAQ refondue"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -860,24 +860,23 @@ function AccountTab(){
 // "Comment ça marche" : présentation + FAQ, accessible à tous (onboarding des potes).
 function FaqTab(){
   const groups=[
-    ["🚀 Démarrer",[
-      ["👋 Première connexion","Sur l'accueil « Qui es-tu ? », tape sur ton prénom. À ta 1re fois, tu remplis ta fiche UNE seule fois (surnom, index / niveau de jeu, mobile, email). C'est tout."],
-      ["🔑 Te reconnecter","Les fois suivantes : tape ton prénom → saisis ton index / niveau de ta DERNIÈRE connexion (petite sécurité : sans le connaître, on n'entre pas sur le compte d'un autre) → puis ajuste ton niveau du jour. ⚠️ L'index n'est PAS un mot de passe : son seul rôle est de calculer les coups rendus, garde-le fidèle à ton vrai niveau."],
-      ["🔔 Rejoindre une partie en cours","Si tu te connectes alors qu'une partie où tu es inscrit n'est pas terminée, l'accueil te propose de la REJOINDRE en un clic (ou « Plus tard »)."],
-      ["⏲️ Déconnexion auto","L'appli te déconnecte (retour à « Qui es-tu ? ») quand tu QUITTES l'appli, ou après un long moment d'inactivité — mais JAMAIS pendant une partie en cours : tu peux scorer tout ton round tranquille."],
-      ["👤 Mon compte","Bouton 👤 en haut : change ton surnom, ton index / niveau, ton mobile, ton email ou ta notif. Tu ne modifies que TA fiche (les autres, c'est l'organisateur)."],
+    ["🚀 Démarrer (ta 1re fois)",[
+      ["👋 Qui es-tu ?","À l'ouverture, tape sur ton prénom dans la liste. La 1re fois, tu remplis ta fiche UNE seule fois (surnom, index/niveau, mobile, email). Ensuite tu es reconnu — pas de mot de passe."],
+      ["🔑 Te reconnecter","Tape ton prénom → saisis ton index/niveau de la DERNIÈRE fois (petite sécurité, ce n'est pas un mot de passe) → ajuste ton niveau du jour. ⚠️ L'index sert UNIQUEMENT à calculer les coups rendus : garde-le fidèle à ton vrai niveau."],
+      ["🔔 Rejoindre","Si une partie ou une Ryder où tu es inscrit n'est pas finie, l'accueil te propose de la REJOINDRE en un clic (ou « Plus tard »)."],
+      ["👤 Mon compte","Bouton 👤 en haut : surnom, index, mobile, email, préférence de notif. Tu y vois aussi ton total de 🏆 Ryder gagnées. Tu ne modifies que TA fiche."],
     ]],
-    ["⛳ Jouer une partie",[
-      ["➕ Lancer une partie","Onglet Nouvelle : Partie amicale (2-4 joueurs) ou Tournoi. Tu choisis le Parcours, les joueurs, la Formule et le Décompte (Brut ou Net, + case « différentiel » pour le match play). Le NOM est automatique (formule + brut/net + date + heure). Tout le monde peut jouer (membres + invités)."],
-      ["👥 Membres & invités","Les membres G&A restent en pastilles. Les anciens invités sont rangés dans une liste déroulante « + Ajouter un ancien invité » pour ne pas encombrer. Tu peux aussi créer un invité à la volée."],
-      ["🤝 Les équipes (2 contre 2)","Pour une formule 2v2 (Fourball, Mexicaine, Scramble, Foursome, Match Play 2v2), une section « Les équipes » te fait désigner qui joue avec qui : Équipe 1 / Équipe 2 (2 joueurs chacune)."],
-      ["✍️ Le scoreur","Dans chaque partie on désigne qui « tient la carte » (le scoreur). À plusieurs parties en parallèle, chacune a SON scoreur ; lui seul saisit les scores."],
-      ["👀 Suivre en direct + une partie à la fois","Les autres ouvrent la même partie et suivent en lecture seule, mis à jour À CHAQUE TROU VALIDÉ. Quand il y a plusieurs parties (tournoi, ou + de 4 joueurs), on n'affiche QUE la prochaine où tu joues ; dès qu'elle est finie, la suivante apparaît. Tu peux toujours revenir à la liste des parties pour entrer dans n'importe laquelle (terminée ou à venir)."],
-      ["📈 Onglet Suivi score","Dans une partie, l'onglet 📈 Suivi score trace la confrontation trou par trou : statut match play (1 UP / All Square / 1 DOWN avec échelle), points cumulés (mexicaine, chouette, stableford…), le tout dans un repère avec l'abscisse en numéros de trous (1 → dernier validé → 18)."],
-      ["🔢 Combien de joueurs ?","Partie amicale = 2 à 4 joueurs (entre potes). À partir de 5 joueurs, reviens à l'accueil et choisis Tournoi / Ryder."],
-      ["🧪 Parties de test","Pour t'entraîner sur l'appli sans polluer le classement, l'organisateur peut charger 5 parties de test (bouton dans l'Historique) — badge TEST violet, hors classement, supprimables à tout moment."],
-      ["📜 Mes parties / Toutes","Onglet Historique : un sélecteur « Mes parties / Toutes » filtre la liste. Les Ryder ressortent en DORÉ. Supprimer une partie retire automatiquement ses points du classement."],
-      ["🗺️ Les parcours","15 parcours préchargés (Nans par défaut, effacé au clic pour taper un autre). Chacun peut en CRÉER (recherche GolfCourseAPI ou saisie à la main) et CORRIGER un par / HCP / slope (mémorisé) — soyez rigoureux 🙏. Seul l'organisateur peut SUPPRIMER un parcours."],
+    ["⛳ Une partie amicale (2 à 4)",[
+      ["➕ Lancer","Accueil → « Partie amicale ». Tu choisis : le parcours, les joueurs (membres + invités), la formule, et le décompte Brut ou Net (+ case « différentiel » pour le match play). Le nom de la partie est automatique."],
+      ["🔢 On est plus de 4 ?","L'amicale, c'est 2 à 4 joueurs. À partir de 5, reviens à l'accueil et choisis « Tournoi / Ryder »."],
+      ["🤝 Les équipes (2 contre 2)","Pour une formule 2 contre 2 (Fourball, Mexicaine, Scramble, Foursome, Match Play 2v2), tu désignes qui joue avec qui : Équipe 1 / Équipe 2."],
+      ["🗺️ Les parcours","Des parcours sont préchargés (Nans par défaut, effacé au clic pour en taper un autre). Chacun peut en CRÉER et CORRIGER un par/slope/SSS inexact (mémorisé) — soyez rigoureux 🙏. Seul l'organisateur peut en SUPPRIMER."],
+    ]],
+    ["🏆 Tournoi & Ryder Cup (5+ joueurs)",[
+      ["🏆 La Ryder Cup, pas à pas","Accueil → Tournoi / Ryder → 🏆 Ryder Cup. (1) Tu crées un CONTENEUR : participants + dates + 2 équipes (tirage équilibré par index OU à la main, modifiable). (2) Pendant le week-end, tu joues tes parties NORMALEMENT et tu les RATTACHES à la Ryder. (3) Le scoreboard des 2 équipes avance à chaque partie validée. (4) À la fin, bouton « 🏁 Clôturer » → les points tombent au classement."],
+      ["🔗 Rattacher une partie","Quand tu crées une partie pendant une Ryder, un menu propose « Rattacher à : [la Ryder] ». OUI = elle compte pour le score des équipes (les équipes sont héritées). NON = partie normale."],
+      ["🥇 Les points d'une Ryder","Équipe GAGNANTE : 8 points par joueur (= 3 « victoire » + 5 « trophée »). Équipe perdante présente : 1 point. Une Ryder compte comme 1 partie au classement ; les parties rattachées servent juste au scoreboard (elles ne donnent pas de points en plus)."],
+      ["🏅 Le Tournoi","Tournoi / Ryder → 🏅 Tournoi : plusieurs manches (chacune son parcours), cumul des points + 5 au vainqueur. Pour jouer à 5+ sans en faire une Ryder."],
     ]],
     ["🎮 Les formules de jeu",[
       ["🎯 2 niveaux de points","Deux choses distinctes : (1) le RÉSULTAT de la partie — qui gagne, dans le langage de la formule ; (2) les POINTS DE SAISON — un système de DUELS identique pour TOUTES les formules, qui alimente le classement. Une partie non validée = 0 point. (Net = brut − coups rendus.)"],
@@ -885,17 +884,21 @@ function FaqTab(){
       ["👥 À 3 joueurs","• Chouette (6 pts/trou) selon les 3 nets : 4/2/0 si tous différents · 3/3/0 (égalité 1er) · 4/1/1 (égalité 2e) · 2/2/2 (les 3 à égalité). • 1v1v1 : le net le plus bas du trou prend 1 pt (partagé si égalité). • Stableford et Skins : comme à 2."],
       ["👥👥 À 4 joueurs (2 contre 2)","Les FOURBALL comparent la meilleure balle nette de chaque équipe, trou par trou → statut 1 UP / All Square / 2&1. • Fourball (meilleure balle) : chacun sa balle. • Fourball — meilleure & moins bonne : 2 pts/trou (1 pt meilleure balle + 1 pt moins bonne), on cumule. • Foursome / Greensome : une balle, coups alternés. • Scramble : on repart toujours de la meilleure position. • Chamble : chacun sa balle SAUF le drive (toute l'équipe repart du meilleur coup de départ). • Mexicaine (brut) : points cumulés (par+par +5, 2 birdies +10, inversion par birdie adverse), expliqués dans « Faits de jeu »."],
     ]],
-    ["🏅 Le championnat",[
-      ["🏅 Les points de saison (duels)","On compte les DUELS (qui bat qui) : 1v1 → Victoire 3 · Nul 1 · Défaite 0. À 3 → 2 duels (V 2) : battre les 2 = 4. Double 2v2 → V 3 chacun. Indépendant de la formule de jeu."],
-      ["⚖️ Qui compte au classement ?","Tout le monde peut jouer (invités compris), mais une confrontation ne RAPPORTE des points de saison que s'il y a AU MOINS 2 membres G&A dedans. ⚠️ Les INVITÉS ne marquent JAMAIS (ni en partie, ni à la Ryder)."],
-      ["🏆 RYDER CUP (nouveau : conteneur + rattachement)","Onglet Nouvelle → Tournoi → Ryder Cup. Une Ryder est un CONTENEUR léger : titre, dates (ex. 27→29/06/26), participants (avec index), 2 équipes nommables (tirage équilibré par index OU à la main). ENSUITE, tu crées tes parties NORMALEMENT et tu choisis « Rattacher à : cette Ryder ». Dans la Ryder tu vois : les équipes, un SCOREBOARD qui avance après chaque partie rattachée validée, et UNE LIGNE PAR PARTIE (format + joueurs + résultat) → un tap ouvre la partie (consulter / saisir / voir la config). Bouton « 🏁 Clôturer la Ryder » = on sanctuarise : +8 points à chaque membre de l'équipe GAGNANTE, +1 à chaque membre de l'équipe perdante (les parties rattachées ne donnent pas de points en plus, elles servent au scoreboard)."],
-      ["🏅 Tournoi","Nouvelle → Tournoi : plusieurs manches (chacune son parcours), mêmes équipes possibles, cumul des points sur l'ensemble et +5 au vainqueur. Idéal pour 5+ joueurs quand ce n'est pas une Ryder."],
-      ["📊 Deux classements + détail","« Cumulé » (qui joue plus marque plus) et « Moyenne par partie ». En bas, « 🔎 Détail des points » : tape un joueur pour voir, partie par partie, d'où viennent ses points. + le bilan des confrontations directes entre potes."],
-      ["🏆 Ryder gagnées & accueil","Chaque compte affiche son nombre de 🏆 Ryder Cups gagnées (dérivé de l'historique). Sur l'écran « Qui es-tu ? », les vainqueurs de la dernière Ryder sont mis en avant en haut, surlignés en or avec une coupe 🏆."],
+    ["🏅 Le classement de saison",[
+      ["🎯 Comment on marque (duels)","Système de DUELS (qui bat qui), identique pour toutes les formules : 1v1 → Victoire 3 · Nul 1 · Défaite 0. À 3 → 2 duels (battre les 2 = 4). Double 2v2 → V 3 par équipier. Indépendant de la formule."],
+      ["⚖️ Qui compte ?","Une confrontation rapporte des points seulement s'il y a AU MOINS 2 membres G&A dedans. ⚠️ Les INVITÉS ne marquent JAMAIS (ni en partie, ni à la Ryder)."],
+      ["📊 Cumulé vs Moyenne","Deux classements : CUMULÉ (le total — plus tu joues/gagnes, plus tu montes) et MOYENNE par partie (pour comparer ceux qui jouent beaucoup et ceux qui jouent peu). À savoir : le bonus trophée d'une Ryder (le +5) compte au CUMULÉ mais PAS dans la moyenne — une Ryder y vaut 3 pour un gagnant, comme une victoire normale."],
+      ["🔎 Détail des points","Tape un joueur dans le classement (« 🔎 Détail des points ») pour voir, partie par partie, d'où viennent ses points. Tu y trouves aussi tes confrontations directes."],
+      ["🏆 Ryder gagnées","Chaque compte affiche son total de Ryder gagnées. Les vainqueurs de la DERNIÈRE Ryder sont mis en avant en haut de l'écran d'accueil, surlignés en or avec une coupe 🏆."],
     ]],
-    ["📲 Communication & réglages",[
-      ["💬 Partage WhatsApp","À la validation du 18e trou : le résultat de la formule + une fiche par joueur (médaille + Stableford BRUT et NET) + l'évolution au classement (points gagnés, rang, ▲/▼ places). Tu partages tout au groupe en un clic. Si la partie ne compte pas (moins de 2 membres), c'est précisé."],
-      ["🔒 Droits & réglages","Le menu ⚙️ (clé parcours, lien du groupe WhatsApp) est réservé à l'organisateur. Lui seul peut aussi modifier la fiche d'un autre joueur et supprimer un parcours. Les autres : ils créent / corrigent les parcours et gèrent LEUR propre fiche."],
+    ["👀 Saisir & suivre en direct",[
+      ["✍️ Le scoreur","Chaque partie a UN scoreur (celui qui « tient la carte »). Lui SEUL saisit les scores. S'il y a plusieurs parties en parallèle, chacune a son propre scoreur."],
+      ["👀 Tout le monde suit","N'importe quel membre — qu'il joue ou non dans la partie — peut l'ouvrir et voir les scores en LECTURE SEULE, mis à jour À CHAQUE TROU VALIDÉ. L'onglet 📈 Suivi score montre l'évolution trou par trou (statut match play, points cumulés…)."],
+      ["📜 Voir toutes les parties","Historique → « 🌍 Toutes » : tout le monde voit et peut OUVRIR toutes les parties — terminées, en cours ou à venir. Les Ryder ressortent en doré. Supprimer une partie retire automatiquement ses points du classement."],
+    ]],
+    ["📲 Partage & droits",[
+      ["💬 Partage WhatsApp","À la fin d'une partie : le résultat + une fiche par joueur (Stableford brut & net) + l'évolution au classement, prêt à partager au groupe en un clic. Si la partie ne compte pas (moins de 2 membres), c'est précisé."],
+      ["🔒 L'organisateur","Le menu ⚙️ (réglages) et la suppression de parcours sont réservés à l'organisateur, qui peut aussi modifier la fiche d'un autre joueur. Les autres : ils créent/corrigent des parcours et gèrent LEUR fiche."],
     ]],
   ];
   const [open,setOpen]=useState(0); // accordéon : index de rubrique ouverte (-1 = toutes fermées)
