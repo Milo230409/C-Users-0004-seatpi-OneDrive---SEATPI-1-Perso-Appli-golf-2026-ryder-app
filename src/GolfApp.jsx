@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, deleteGameByDataId, dedupeGamesC
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.77 · amicale 2-4 + FAQ nettoyée"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.78 · outils en bas + Ryder démo conteneur"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -2295,21 +2295,31 @@ function makeTestGames(members,courses){
     mk(5,"mexicaine",4,"gross",true),
   ];
 }
-// Construit une Ryder déjà jouée : l'équipe GAGNANTE (winners) bat l'équipe perdante (losers)
-// via un match décisif (winners 3 partout, losers 6). Points : gagnants 3+5=8, perdants venus 1.
+// Construit une Ryder NEW-LOOK : un CONTENEUR (équipes gagnante/perdante) + 2 PARTIES RATTACHÉES
+// déjà jouées que l'équipe 0 gagne. Renvoie [conteneur, partie1, partie2]. Conteneur clôturé →
+// le classement reçoit 8 pts aux gagnants, 1 aux perdants ; les parties rattachées font le scoreboard.
 function buildRyder(winners,losers,wName,lName,courses){
   const co=courses.find(c=>/Nans/i.test(c.name||""))||courses[0];
+  const cid=co?.id;
   const mk=(p,team)=>({id:p.id,name:p.name,nick:p.nick||"",member:true,
     index:(p.index&&p.index>0)?p.index:18,tee:"Jaune",team});
   const roster=[...winners.map(p=>mk(p,0)),...losers.map(p=>mk(p,1))];
-  const full=v=>{const o={};for(let h=0;h<18;h++)o[h]=v;return o;};
-  const scores={}; winners.forEach(p=>scores[p.id]=full(3)); losers.forEach(p=>scores[p.id]=full(6));
-  const subgames=[{id:1,formula:"stableford",players:[...winners,...losers].map(p=>p.id),scores,
-    validated:Array.from({length:18},(_,k)=>k),done:true,hcpRelative:false}];
   const t=Date.now();
-  return {id:t,name:`🏆 Ryder Cup · ${wName||"Gagnants"}`,type:"event",subtype:"ryder",mode:"net",roster,
-    teamNames:[wName||"Gagnants",lName||"Perdants"],hats:[],hcpRelative:false,done:true,created:t,
-    rounds:[{id:1,courseId:co?.id,courseName:co?.name||"Parcours",subgames,done:true}]};
+  const tnames=[wName||"Gagnants",lName||"Perdants"];
+  const cont={id:t,name:`🏆 Ryder Cup · ${tnames[0]}`,type:"event",subtype:"ryder",isContainer:true,
+    mode:"net",roster,teamNames:tnames,datesFrom:"27/06/26",datesTo:"29/06/26",
+    hcpRelative:false,done:true,created:t};
+  const full=v=>{const o={};for(let h=0;h<18;h++)o[h]=v;return o;};
+  // 2 parties rattachées 1v1 : un gagnant (score 3) bat un perdant (score 6) → équipe 0 gagne les 2.
+  const mkPartie=(idx,w,l)=>({id:t+idx,name:`Match play · ${dispName(w)} vs ${dispName(l)}`,type:"simple",
+    courseId:cid,mode:"net",eventId:t,roster:[mk(w,0),mk(l,1)],teamNames:tnames,
+    hcpRelative:false,done:true,created:t+idx,
+    subgames:[{id:1,formula:"matchplay",players:[w.id,l.id],
+      scores:{[w.id]:full(3),[l.id]:full(6)},
+      validated:Array.from({length:18},(_,k)=>k),done:true,hcpRelative:false}]});
+  const p1=mkPartie(1,winners[0],losers[0]);
+  const p2=mkPartie(2,winners[1]||winners[0],losers[1]||losers[0]);
+  return [cont,p1,p2];
 }
 // Pré-remplissage par défaut (Rory+Scottie+Passe Partout gagnants vs Fortnite+Trichatard+JiP).
 function defaultRyderTeams(members){
@@ -2370,11 +2380,19 @@ function History({openId,onConsumeOpen}){
   const loadDemos=()=>{
     const demos=makeTestGames(members,courses);
     if(!demos.length) return alert("Il faut au moins 4 joueurs préchargés pour générer les parties de test.");
-    if(!confirm("Charger 5 parties de TEST (match play, chouette, stableford, fourball, mexicaine) déjà jouées ?\nElles sont marquées 🧪 TEST et ne comptent pas au classement.")) return;
+    if(!confirm("Charger 5 parties de TEST (match play, chouette, stableford, fourball, mexicaine) déjà jouées ?")) return;
+    if(!confirm("Confirmer ? Elles sont marquées 🧪 TEST (hors classement) et supprimables à tout moment.")) return;
     setGames([...demos,...games]); setScope("all");
   };
-  const onCreateRyder=(game)=>{ setGames([game,...games]); setShowRyder(false); setScope("all"); };
-  const doCleanup=async()=>{ setCleaning("…");
+  const onCreateRyder=(newGames)=>{ // newGames = [conteneur, partie1, partie2]
+    if(!confirm("Créer une Ryder de démo (new look) : 1 conteneur + 2 parties rattachées ?")) return;
+    if(!confirm("Confirmer ? Elle est clôturée → 8 pts aux gagnants, 1 aux perdants au classement (supprimable).")) return;
+    setGames([...newGames,...games]); setShowRyder(false); setScope("all");
+  };
+  const doCleanup=async()=>{
+    if(!confirm("Nettoyer les doublons de parties dans le cloud ?")) return;
+    if(!confirm("Confirmer le nettoyage des doublons (réparation du classement) ?")) return;
+    setCleaning("…");
     const n=await cleanupDuplicates();
     setCleaning(n>0?`✅ ${n} doublon(s) supprimé(s)`:"✅ Aucun doublon");
     setTimeout(()=>setCleaning(""),3000); };
@@ -2403,19 +2421,6 @@ function History({openId,onConsumeOpen}){
           border:"none",cursor:"pointer",fontWeight:800,fontSize:12,transition:"all .15s",
           background:scope===k?T.accent:"transparent",color:scope===k?T.ink:T.dim}}>{lab}</button>))}
     </div>
-    {admin&&showRyder&&<RyderBuilder members={members} courses={courses}
-      onCreate={onCreateRyder} onCancel={()=>setShowRyder(false)}/>}
-    {admin&&<div style={{marginBottom:10,display:"flex",flexDirection:"column",gap:6}}>
-      <button onClick={loadDemos} style={{...delBtn,width:"100%",fontSize:12,
-        borderColor:T.violet,color:T.violet}}>🧪 Charger 5 parties de test (hors classement)</button>
-      {!showRyder&&<button onClick={()=>setShowRyder(true)} style={{...delBtn,width:"100%",fontSize:12,
-        borderColor:T.gold,color:T.gold}}>🏆 Créer une Ryder (équipes modifiables)</button>}
-      {cloud&&<button onClick={doCleanup} style={{...delBtn,width:"100%",fontSize:12,
-        borderColor:T.gold,color:T.gold}}>🧹 Nettoyer les doublons (réparer le classement)</button>}
-      {cleaning&&<div style={{fontSize:11,color:T.accent,textAlign:"center"}}>{cleaning}</div>}
-      <button onClick={doClearAll} style={{...delBtn,width:"100%",fontSize:12,
-        borderColor:T.us,color:T.us}}>🗑️ Tout supprimer · repartir à zéro (test → vraie saison)</button>
-    </div>}
     {!shown.length && <Empty text={scope==="mine"?"Aucune partie à ton nom. Bascule sur « Toutes » ou crée-en une.":"Aucune partie. Crée-en une depuis l'accueil."}/>}
     {shown.map(g=>{const ryder=g.subtype==="ryder";return (<div key={g.id} onClick={()=>setOpen(g.id)}
       style={{...card(g.test?T.violet:ryder?T.gold:g.done?T.accent:T.gold),cursor:"pointer",
@@ -2434,7 +2439,26 @@ function History({openId,onConsumeOpen}){
           {" · "}{g.done?"terminé":"en cours"} · tap pour ouvrir</div>
       </div>
       <button onClick={e=>delGame(g.id,e)} style={{...delBtn,flexShrink:0}}>🗑</button>
-    </div>);})}</div>);
+    </div>);})}
+
+    {/* Outils organisateur — tout en bas, chaque action double-confirmée */}
+    {admin&&<div style={{marginTop:18,paddingTop:12,borderTop:`1px solid ${T.line}`}}>
+      <div style={{fontSize:10,color:T.dim,marginBottom:8,textTransform:"uppercase",
+        letterSpacing:.5,fontWeight:700}}>🔧 Outils organisateur</div>
+      {showRyder&&<RyderBuilder members={members} courses={courses}
+        onCreate={onCreateRyder} onCancel={()=>setShowRyder(false)}/>}
+      <div style={{display:"flex",flexDirection:"column",gap:6}}>
+        <button onClick={loadDemos} style={{...delBtn,width:"100%",fontSize:12,
+          borderColor:T.violet,color:T.violet}}>🧪 Charger 5 parties de test (hors classement)</button>
+        {!showRyder&&<button onClick={()=>setShowRyder(true)} style={{...delBtn,width:"100%",fontSize:12,
+          borderColor:T.gold,color:T.gold}}>🏆 Créer une Ryder (new look · conteneur + 2 parties)</button>}
+        {cloud&&<button onClick={doCleanup} style={{...delBtn,width:"100%",fontSize:12,
+          borderColor:T.gold,color:T.gold}}>🧹 Nettoyer les doublons (réparer le classement)</button>}
+        {cleaning&&<div style={{fontSize:11,color:T.accent,textAlign:"center"}}>{cleaning}</div>}
+        <button onClick={doClearAll} style={{...delBtn,width:"100%",fontSize:12,
+          borderColor:T.us,color:T.us}}>🗑️ Tout supprimer · repartir à zéro</button>
+      </div>
+    </div>}</div>);
 }
 
 // Choix du scoreur d'UNE sous-partie (flight). Chaque partie qui se joue désigne le
