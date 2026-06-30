@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, deleteGameByDataId, dedupeGamesC
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.72 · prime membres seulement"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.73 · Ryder conteneur + rattachement"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -1125,6 +1125,11 @@ function NewGame({setTab}){
   const [over,setOver]=useState({});  // overrides {playerId:{index}} ajustables pour la partie
   const [split,setSplit]=useState(null);          // amicale >4 : répartition en flights
   const [flightOf,setFlightOf]=useState({});       // amicale >4 : id joueur -> n° de flight
+  const [datesFrom,setDatesFrom]=useState("");     // Ryder conteneur : dates de l'évènement
+  const [datesTo,setDatesTo]=useState("");
+  const [t0Name,setT0Name]=useState("Équipe 1");   // noms des 2 équipes de la Ryder
+  const [t1Name,setT1Name]=useState("Équipe 2");
+  const [attachTo,setAttachTo]=useState("");        // partie normale : rattachée à quelle Ryder
   const [formula,setFormula]=useState(null);
   const [teamOf,setTeamOf]=useState({}); // 2v2 : id joueur -> 0 (Équipe 1) ou 1 (Équipe 2)
   // Tournoi multi-manches : chaque manche a SON parcours ET SA répartition (formules)
@@ -1213,26 +1218,41 @@ function NewGame({setTab}){
       if(t0.length!==2||t1.length!==2) return alert("Forme 2 équipes de 2 joueurs.");
       ordered=[...t0,...t1];
     }
+    // RYDER (conteneur) : participants + 2 équipes (assignées dans le détail) + dates. Pas de manches.
+    if(type==="event"&&subtype==="ryder"){
+      const rosterR=allPlayers.map(p=>({...p,tee:getTee(p.id),index:getIndex(p),team:undefined}));
+      const datesTxt=datesFrom?` · ${datesFrom}${datesTo?`→${datesTo}`:""}`:"";
+      const game={id:Date.now(),name:`🏆 Ryder Cup${datesTxt}`,type:"event",subtype:"ryder",
+        isContainer:true,mode,roster:rosterR,teamNames:[t0Name.trim()||"Équipe 1",t1Name.trim()||"Équipe 2"],
+        datesFrom,datesTo,hcpRelative,done:false,created:Date.now(),test:isTest};
+      setGames([game,...games]);setTab("history");return;
+    }
     const roster=ordered.map((p,i)=>({...p,tee:getTee(p.id),
       index:getIndex(p),
       team:type==="event"?null:(team2v2?(i<2?0:1):undefined)}));
     if(type==="simple"){
+      // Rattachement éventuel à une Ryder en cours : on hérite des équipes du conteneur.
+      const container=attachTo?games.find(g=>g.isContainer&&String(g.id)===String(attachTo)):null;
+      const rosterF=container?roster.map(p=>({...p,
+        team:container.roster.find(rp=>String(rp.id)===String(p.id))?.team})):roster;
+      const eventId=container?container.id:undefined;
+      const evTeams=container?container.teamNames:null;
       if(n<=4){
-        const ids=roster.map(p=>p.id);
+        const ids=rosterF.map(p=>p.id);
         const subgames=[{id:1,formula,players:ids,scores:{},validated:[],done:false,hcpRelative}];
-        const game={id:Date.now(),name:finalName(),type,courseId,mode,roster,subgames,test:isTest,
-          hcpRelative,teamNames:team2v2?["Équipe 1","Équipe 2"]:null,done:false,created:Date.now()};
+        const game={id:Date.now(),name:finalName(),type,courseId,mode,roster:rosterF,subgames,test:isTest,
+          eventId,hcpRelative,teamNames:evTeams||(team2v2?["Équipe 1","Équipe 2"]:null),done:false,created:Date.now()};
         setGames([game,...games]);setTab("history");return;
       }
       // PLUS de 4 joueurs : plusieurs parties (flights) selon la configuration choisie
       const sp=split||autoSplit(n);
-      const flights=sp.map((grp,gi)=>({grp,gi,players:roster.filter(p=>flightOfP(p)===gi)}));
+      const flights=sp.map((grp,gi)=>({grp,gi,players:rosterF.filter(p=>flightOfP(p)===gi)}));
       const bad=flights.find(f=>f.players.length!==f.grp.size);
       if(bad) return alert(`Configuration incomplète : la partie ${bad.gi+1} doit compter ${bad.grp.size} joueurs (actuellement ${bad.players.length}). Ajuste l'affectation des joueurs.`);
       const subgames=flights.map((f,i)=>({id:i+1,formula:f.grp.formula,
         players:f.players.map(p=>p.id),scores:{},validated:[],done:false,hcpRelative}));
-      const game={id:Date.now(),name:finalName(),type,courseId,mode,roster,subgames,test:isTest,
-        hcpRelative,teamNames:null,done:false,created:Date.now()};
+      const game={id:Date.now(),name:finalName(),type,courseId,mode,roster:rosterF,subgames,test:isTest,
+        eventId,hcpRelative,teamNames:evTeams,done:false,created:Date.now()};
       setGames([game,...games]);setTab("history");return;
     }
     if(subtype==="coupe"){
@@ -1480,7 +1500,29 @@ function NewGame({setTab}){
         </>);
       })())}
 
-      {type==="event"&&subtype!=="coupe"&&n>=2&&(<>
+      {/* RYDER (conteneur) : juste les dates + les noms d'équipes. Les parties se rattachent ensuite. */}
+      {type==="event"&&subtype==="ryder"&&n>=2&&(<>
+        <Section>Ryder Cup — infos</Section>
+        <div style={{...card(T.eu),fontSize:12,color:T.dim,lineHeight:1.5}}>
+          🏆 Une Ryder = un <b style={{color:T.text}}>conteneur</b> : tu choisis les participants et
+          les équipes. Ensuite, chaque partie se crée normalement et se <b style={{color:T.text}}>rattache</b>
+          à cette Ryder. Le scoreboard et les points suivent automatiquement.</div>
+        <div style={{display:"flex",gap:8,marginTop:8}}>
+          <label style={{flex:1}}><span style={{fontSize:10,color:T.dim}}>DÉBUT</span>
+            <input value={datesFrom} onChange={e=>setDatesFrom(e.target.value)} placeholder="27/06/26" style={{...inp,marginTop:2}}/></label>
+          <label style={{flex:1}}><span style={{fontSize:10,color:T.dim}}>FIN</span>
+            <input value={datesTo} onChange={e=>setDatesTo(e.target.value)} placeholder="29/06/26" style={{...inp,marginTop:2}}/></label>
+        </div>
+        <div style={{display:"flex",gap:8,marginTop:8}}>
+          <label style={{flex:1}}><span style={{fontSize:10,color:T.eu}}>ÉQUIPE 1</span>
+            <input value={t0Name} onChange={e=>setT0Name(e.target.value)} style={{...inp,marginTop:2}}/></label>
+          <label style={{flex:1}}><span style={{fontSize:10,color:T.us}}>ÉQUIPE 2</span>
+            <input value={t1Name} onChange={e=>setT1Name(e.target.value)} style={{...inp,marginTop:2}}/></label>
+        </div>
+        <div style={{fontSize:11,color:T.dim,marginTop:8}}>👉 Tu formeras les équipes (tirage ou à la main) dans le détail de la Ryder.</div>
+      </>)}
+
+      {type==="event"&&subtype!=="coupe"&&subtype!=="ryder"&&n>=2&&(<>
         <Section>Formules par manche (modifiable)</Section>
         <div style={{fontSize:11,color:T.dim,marginBottom:6}}>
           Chaque manche/jour peut avoir des formules différentes : scramble un jour,
@@ -1515,6 +1557,20 @@ function NewGame({setTab}){
         <Section>Décompte</Section>
         {decompteUI}
       </>)}
+
+      {/* RATTACHER une partie normale à une Ryder en cours */}
+      {type==="simple" && games.some(g=>g.isContainer&&!g.done) && (
+        <div style={{...card(T.gold),marginTop:14}}>
+          <div style={{fontSize:10,color:T.dim,marginBottom:4,textTransform:"uppercase",
+            letterSpacing:.5,fontWeight:700}}>🏆 Rattacher à une Ryder ?</div>
+          <select value={attachTo} onChange={e=>setAttachTo(e.target.value)} style={inp}>
+            <option value="">Aucune (partie normale)</option>
+            {games.filter(g=>g.isContainer&&!g.done).map(g=>
+              <option key={g.id} value={g.id}>{g.name}</option>)}
+          </select>
+          {attachTo&&<div style={{fontSize:11,color:T.accent,marginTop:6}}>
+            ✅ Comptera pour la Ryder — les équipes sont héritées du conteneur.</div>}
+        </div>)}
 
       <label style={{...card(isTest?T.gold:T.line),display:"flex",alignItems:"center",gap:10,
         marginTop:14,cursor:"pointer"}}>
@@ -1683,6 +1739,20 @@ function computeStandings(done, courses){
   const counts=ps=>ps.filter(isMember).length>=2;
   done.forEach(g=>{
     if(g.test) return;           // partie de TEST → jamais comptabilisée au classement
+    if(g.isContainer){
+      // CONTENEUR Ryder : les parties RATTACHÉES donnent déjà leurs points (parties normales).
+      // Ici on ajoute seulement le TROPHÉE (+5 à l'équipe championne) et la PRIME de présence
+      // (+1 aux membres présents non champions). Champion = équipe qui a gagné le + de parties.
+      const tw=[0,0];
+      done.filter(x=>String(x.eventId)===String(g.id)).forEach(pt=>{const w=partieTeamWinner(pt,courses);if(w!=null)tw[w]++;});
+      const champ=tw[0]>tw[1]?0:tw[1]>tw[0]?1:null;
+      const gp={};
+      if(champ!=null) (g.roster||[]).forEach(p=>{ if(p.team===champ&&isMember(p)){ ensure(p.id).pts+=5; gp[p.id]=5; } });
+      (g.roster||[]).forEach(p=>{ if((p.team!==0&&p.team!==1)||!isMember(p)) return;
+        if((gp[p.id]||0)>0) return; ensure(p.id).pts+=1; gp[p.id]=1; });
+      Object.entries(gp).forEach(([id,pt])=>detail(id,g.id,g.name,pt));
+      return;
+    }
     if(!gameComplete(g)) return; // partie non disputée / 18 trous non remplis → 0 point
     const net=g.mode==="net";
     const subs=g.rounds
@@ -1748,8 +1818,9 @@ function computeStandings(done, courses){
     }
     Object.entries(gamePts).forEach(([id,pt])=>detail(id,g.id,g.name,pt));
   });
-  // « parties jouées » = nombre de PARTIES distinctes (pas de manches) → moyenne juste
-  Object.keys(S).forEach(id=>{ S[id].played=(D[id]||[]).length; });
+  // « parties jouées » = nombre de PARTIES distinctes (hors conteneurs Ryder) → moyenne juste
+  const containerIds=new Set((done||[]).filter(g=>g.isContainer).map(g=>String(g.id)));
+  Object.keys(S).forEach(id=>{ S[id].played=(D[id]||[]).filter(d=>!containerIds.has(String(d.id))).length; });
   return {S,H,D};
 }
 
@@ -1777,24 +1848,47 @@ function seasonImpact(g, games, courses){
   return {lines,counted};
 }
 
-// ===== RYDER : équipe gagnante, compteur de Ryder gagnées par joueur =====
-// Équipe gagnante d'une Ryder (0/1) = celle qui remporte le + de matchs. null si indéterminé.
-function ryderWinningTeam(g,courses){
-  if(g?.subtype!=="ryder"||!g.rounds) return null;
-  const net=g.mode==="net";const teamWins=[0,0];
-  g.rounds.forEach(r=>{const course=(courses||[]).find(c=>c.id===r.courseId);
-    (r.subgames||[]).forEach(sg=>{ if(!subComplete(sg)) return;
-      const ps=sg.players.map(id=>(g.roster||[]).find(p=>p.id===id)).filter(Boolean);
-      const {pts}=playerScores(sg,ps,course,net);const ts=[0,0];
-      ps.forEach(p=>{if(p.team===0||p.team===1)ts[p.team]+=(pts[p.id]||0);});
-      const w=ts[0]>ts[1]?0:ts[1]>ts[0]?1:null; if(w!=null)teamWins[w]++; });});
-  return teamWins[0]>teamWins[1]?0:teamWins[1]>teamWins[0]?1:null;
+// ===== RYDER : modèle CONTENEUR (parties rattachées) + rétro-compat ancien modèle (manches) =====
+// Équipe gagnante d'UNE partie (somme des points par équipe sur ses sous-parties). null = nul.
+function partieTeamWinner(g,courses){
+  if(!g||g.test) return null;
+  const net=g.mode==="net";
+  const subs=g.rounds
+    ? g.rounds.flatMap(r=>r.subgames.map(sg=>({sg,course:(courses||[]).find(c=>c.id===r.courseId)})))
+    : (g.subgames||[]).map(sg=>({sg,course:(courses||[]).find(c=>c.id===g.courseId)}));
+  const ts=[0,0];
+  subs.forEach(({sg,course})=>{ if(!subComplete(sg)) return;
+    const ps=sg.players.map(id=>(g.roster||[]).find(p=>p.id===id)).filter(Boolean);
+    const {pts}=playerScores(sg,ps,course,net);
+    ps.forEach(p=>{ if(p.team===0||p.team===1) ts[p.team]+=(pts[p.id]||0); }); });
+  return ts[0]>ts[1]?0:ts[1]>ts[0]?1:null;
+}
+// Parties rattachées à un conteneur (terminées, non test).
+function attachedParties(container,games){
+  return (games||[]).filter(x=>x.done&&!x.test&&String(x.eventId)===String(container.id));
+}
+// Équipe gagnante d'une Ryder : conteneur → + de parties rattachées gagnées ; ancien → + de manches.
+function ryderWinningTeam(g,games,courses){
+  if(g?.subtype!=="ryder") return null;
+  const tw=[0,0];
+  if(g.isContainer){
+    attachedParties(g,games).forEach(pt=>{const w=partieTeamWinner(pt,courses);if(w!=null)tw[w]++;});
+  } else if(g.rounds){
+    const net=g.mode==="net";
+    g.rounds.forEach(r=>{const course=(courses||[]).find(c=>c.id===r.courseId);
+      (r.subgames||[]).forEach(sg=>{ if(!subComplete(sg))return;
+        const ps=sg.players.map(id=>(g.roster||[]).find(p=>p.id===id)).filter(Boolean);
+        const {pts}=playerScores(sg,ps,course,net);const ts=[0,0];
+        ps.forEach(p=>{if(p.team===0||p.team===1)ts[p.team]+=(pts[p.id]||0);});
+        const w=ts[0]>ts[1]?0:ts[1]>ts[0]?1:null;if(w!=null)tw[w]++;});});
+  } else return null;
+  return tw[0]>tw[1]?0:tw[1]>tw[0]?1:null;
 }
 // Nombre de Ryder gagnées par joueur (DÉRIVÉ de l'historique → se met à jour si on supprime).
 function ryderWinsMap(games,courses){
   const map={};
   (games||[]).filter(g=>g.subtype==="ryder"&&g.done&&!g.test).forEach(g=>{
-    const w=ryderWinningTeam(g,courses); if(w==null) return;
+    const w=ryderWinningTeam(g,games,courses); if(w==null) return;
     (g.roster||[]).forEach(p=>{ if(p.team===w) map[String(p.id)]=(map[String(p.id)]||0)+1; });});
   return map;
 }
@@ -1802,7 +1896,7 @@ function ryderWinsMap(games,courses){
 function lastRyderWinners(games,courses){
   const ryders=(games||[]).filter(g=>g.subtype==="ryder"&&g.done&&!g.test)
     .sort((a,b)=>(b.created||0)-(a.created||0));
-  for(const g of ryders){const w=ryderWinningTeam(g,courses);
+  for(const g of ryders){const w=ryderWinningTeam(g,games,courses);
     if(w!=null) return new Set((g.roster||[]).filter(p=>p.team===w).map(p=>String(p.id)));}
   return new Set();
 }
@@ -2368,7 +2462,7 @@ function History({openId,onConsumeOpen}){
     if(confirm("Supprimer définitivement cette partie de l'historique ?")) removeGame(g);};
   if(open){const g=games.find(x=>x.id===open);
     if(g) return <GameDetail g={g} members={members} courses={courses} games={games}
-      setGames={setGames} back={()=>setOpen(null)}/>;}
+      setGames={setGames} back={()=>setOpen(null)} openGame={(id)=>setOpen(id)}/>;}
   return (<div><Section>Parties ({shown.length})</Section>
     {/* sélecteur slide : mes parties / toutes */}
     <div style={{display:"flex",background:T.panel,borderRadius:999,padding:3,marginBottom:10}}>
@@ -2487,11 +2581,87 @@ function ReconfigPanel({g,save}){
         </div>)}
   </div>);
 }
-function GameDetail({g,members,courses,games,setGames,back}){
+// Vue d'une Ryder CONTENEUR : équipes + scoreboard + liste claire des parties rattachées.
+function RyderContainerView({g,games,courses,members,save,back,openGame}){
+  const {user}=useContext(Ctx);
+  const [showTeams,setShowTeams]=useState(false);
+  const teamNames=g.teamNames||["Équipe 1","Équipe 2"];
+  const teamsFormed=g.roster.some(p=>p.team===0||p.team===1);
+  const myId=user?.id;
+  const parties=games.filter(x=>String(x.eventId)===String(g.id))
+    .sort((a,b)=>(a.created||0)-(b.created||0));
+  const tw=[0,0];
+  parties.forEach(p=>{ if(!p.done)return; const w=partieTeamWinner(p,courses); if(w!=null)tw[w]++; });
+  const setTeam=(pid,team)=>save({...g,roster:g.roster.map(p=>p.id===pid?{...p,team}:p)});
+  const renameTeam=(i,name)=>save({...g,teamNames:teamNames.map((t,j)=>j===i?name:t)});
+  const applyDraw=({assign})=>save({...g,roster:g.roster.map(p=>assign[p.id]!==undefined?{...p,team:assign[p.id]}:p)});
+  const toggleDone=()=>save({...g,done:!g.done});
+  const info=p=>{
+    const sg=(p.subgames||[])[0]||(p.rounds?.[0]?.subgames?.[0]);
+    const fmt=sg?(FORMULA_SHORT[sg.formula]||sg.formula):"Partie";
+    const a=(p.roster||[]).filter(x=>x.team===0).map(dispName).join("/");
+    const b=(p.roster||[]).filter(x=>x.team===1).map(dispName).join("/");
+    const vs=a&&b?`${a} vs ${b}`:(p.roster||[]).map(dispName).join(", ");
+    const started=(sg?.validated||[]).length>0;
+    const w=p.done?partieTeamWinner(p,courses):null;
+    const status=p.done?(w!=null?`✅ ${teamNames[w]}`:"✅ nul"):(started?"⏳ en cours":"à jouer");
+    return {fmt,vs,status,mine:(p.roster||[]).some(x=>String(x.id)===String(myId))};
+  };
+  return (<div>
+    <button onClick={back} style={{...delBtn,marginBottom:8}}>← Retour</button>
+    <Section>{g.name}</Section>
+    {(g.datesFrom||g.datesTo)&&<div style={{fontSize:12,color:T.dim,marginBottom:8}}>📅 {g.datesFrom}{g.datesTo?` → ${g.datesTo}`:""}</div>}
+
+    {!g.done&&!teamsFormed&&<DrawHats g={g} onAssign={applyDraw}/>}
+
+    {teamsFormed&&<div style={{display:"flex",gap:10,marginBottom:12}}>
+      {[0,1].map(ti=>{const win=tw[ti]>tw[1-ti];return (
+        <div key={ti} style={{flex:1,borderRadius:14,padding:"12px 8px",textAlign:"center",
+          border:`2px solid ${win?T.gold:(ti===0?T.eu:T.us)+"66"}`,
+          background:win?`${T.gold}1a`:`${(ti===0?T.eu:T.us)}14`}}>
+          <div style={{fontSize:12,fontWeight:800,color:win?T.gold:T.text}}>{win&&"🏆 "}{teamNames[ti]}</div>
+          <div style={{fontFamily:"Anton",fontSize:30}}>{tw[ti]}</div>
+          <div style={{fontSize:10,color:T.dim}}>{g.roster.filter(p=>p.team===ti).map(dispName).join(" · ")}</div>
+        </div>);})}
+    </div>}
+
+    {!g.done&&teamsFormed&&<div style={{...card(T.line),marginBottom:12}}>
+      <button onClick={()=>setShowTeams(s=>!s)} style={{background:"none",border:"none",color:T.text,
+        fontWeight:800,fontSize:13,cursor:"pointer",width:"100%",textAlign:"left",padding:0,
+        display:"flex",justifyContent:"space-between"}}>
+        <span>⚙️ Équipes</span><span style={{color:T.dim}}>{showTeams?"▲":"▼ modifier"}</span></button>
+      {showTeams&&<div style={{marginTop:10}}><TeamManager g={g} renameTeam={renameTeam} setTeam={setTeam}/></div>}
+    </div>}
+
+    <Section>Parties de la Ryder ({parties.length})</Section>
+    {!parties.length&&<div style={{...card(T.gold),fontSize:12,color:T.dim,lineHeight:1.5}}>
+      Aucune partie rattachée pour l'instant. Va dans <b style={{color:T.text}}>＋ Nouvelle</b>,
+      crée une partie normalement, et choisis « <b style={{color:T.text}}>Rattacher à : {g.name}</b> ».</div>}
+    {parties.map(p=>{const i=info(p);return (
+      <div key={p.id} onClick={()=>openGame&&openGame(p.id)}
+        style={{...card(p.done?T.accent:T.gold),cursor:"pointer"}}>
+        <div style={{display:"flex",justifyContent:"space-between",gap:8,alignItems:"center"}}>
+          <span style={{fontWeight:800,fontSize:13}}>{i.fmt}
+            {i.mine&&<span style={{fontSize:9,color:T.accent,border:`1px solid ${T.accent}`,
+              borderRadius:6,padding:"1px 5px",marginLeft:6}}>TOI</span>}</span>
+          <span style={{fontSize:11,color:T.dim,flexShrink:0}}>{i.status}</span></div>
+        <div style={{fontSize:12,color:T.text,marginTop:2}}>{i.vs}</div>
+        <div style={{fontSize:10,color:T.accent,marginTop:2}}>tap pour ouvrir →</div>
+      </div>);})}
+
+    {teamsFormed&&<button onClick={toggleDone} style={{...addBtn,marginTop:10,
+      background:g.done?T.line:T.gold,color:g.done?T.text:"#1a1200"}}>
+      {g.done?"↩ Rouvrir la Ryder":"🏁 Clôturer la Ryder (attribuer le trophée)"}</button>}
+  </div>);
+}
+function GameDetail({g,members,courses,games,setGames,back,openGame}){
   const {user}=useContext(Ctx);
   const isTournament=!!g.rounds;
   const playerById=id=>g.roster.find(p=>p.id===id)||members.find(m=>m.id===id);
   const save=ng=>setGames(games.map(x=>x.id===g.id?ng:x));
+  // Ryder CONTENEUR : vue dédiée (équipes + scoreboard + liste des parties rattachées).
+  if(g.isContainer) return <RyderContainerView g={g} games={games} courses={courses}
+    members={members} save={save} back={back} openGame={openGame}/>;
   // Scoreur DÉSIGNÉ PAR SOUS-PARTIE (flight) : chaque partie qui se joue a son propre
   // scoreur. On ne peut saisir QUE sa propre partie, pas "celle de derrière".
   const myId=user?.id;
