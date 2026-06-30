@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, deleteGameByDataId, dedupeGamesC
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.84 · FAQ refondue"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.85 · parties rattachées masquées"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -2395,7 +2395,10 @@ function History({openId,onConsumeOpen}){
   const [scope,setScope]=useState("mine"); // "mine" = mes parties · "all" = toutes
   const [cleaning,setCleaning]=useState("");
   const mine=g=>(g.roster||[]).some(p=>String(p.id)===String(user?.id));
-  const shown=scope==="mine"?games.filter(mine):games;
+  // Les parties RATTACHÉES à une Ryder n'apparaissent PAS au niveau principal : on les voit
+  // uniquement EN OUVRANT leur Ryder (sa liste de parties). On les masque donc ici.
+  const top=games.filter(g=>!g.eventId);
+  const shown=scope==="mine"?top.filter(mine):top;
   const loadDemos=()=>{
     const demos=makeTestGames(members,courses);
     if(!demos.length) return alert("Il faut au moins 4 joueurs préchargés pour générer les parties de test.");
