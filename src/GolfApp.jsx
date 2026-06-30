@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, deleteGameByDataId, dedupeGamesC
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.86 · Ryder = 1 partie (3 + bonus 5)"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.87 · note + distinctions Ryder"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -2427,10 +2427,10 @@ function History({openId,onConsumeOpen}){
   const isMember=p=>p.member===true||/^seed-/.test(String(p.id));
   const delGame=(id,e)=>{e.stopPropagation();
     const g=games.find(x=>x.id===id); if(!g) return;
-    // une partie VALIDÉE contenant des membres = protégée : seul l'organisateur peut la supprimer
+    // Une partie FINALISÉE (validée) ne peut être supprimée QUE par l'organisateur.
     // (les parties de test ne sont pas protégées : elles ne comptent pas au classement)
-    if(g.done && !g.test && (g.roster||[]).some(isMember) && !admin){
-      alert("🔒 Cette partie validée fait partie du championnat : seul l'organisateur peut la supprimer.");
+    if(g.done && !g.test && !admin){
+      alert("🔒 Cette partie est finalisée : seul l'organisateur peut la supprimer.");
       return;}
     if(confirm("Supprimer définitivement cette partie de l'historique ?")) removeGame(g);};
   if(open){const g=games.find(x=>x.id===open);
@@ -2575,6 +2575,7 @@ function RyderContainerView({g,games,courses,members,save,back,openGame}){
   const renameTeam=(i,name)=>save({...g,teamNames:teamNames.map((t,j)=>j===i?name:t)});
   const applyDraw=({assign})=>save({...g,roster:g.roster.map(p=>assign[p.id]!==undefined?{...p,team:assign[p.id]}:p)});
   const toggleDone=()=>save({...g,done:!g.done});
+  const setField=(k,v)=>save({...g,[k]:v}); // note / meilleur joueur / cuillère en bois
   const info=p=>{
     const sg=(p.subgames||[])[0]||(p.rounds?.[0]?.subgames?.[0]);
     const fmt=sg?(FORMULA_SHORT[sg.formula]||sg.formula):"Partie";
@@ -2640,6 +2641,28 @@ function RyderContainerView({g,games,courses,members,save,back,openGame}){
         <div style={{fontSize:12,color:T.text,marginTop:2}}>{i.vs}</div>
         <div style={{fontSize:10,color:T.accent,marginTop:2}}>tap pour ouvrir →</div>
       </div>);})}
+
+    {/* Distinctions + note libre (à remplir surtout à la clôture) */}
+    {teamsFormed&&<div style={{...card(T.gold),marginTop:12}}>
+      <div style={{fontSize:10,color:T.dim,marginBottom:6,textTransform:"uppercase",
+        letterSpacing:.5,fontWeight:700}}>🏅 Distinctions & note</div>
+      <div style={{display:"flex",gap:8}}>
+        <label style={{flex:1}}><span style={{fontSize:10,color:T.gold}}>🥇 Meilleur joueur</span>
+          <select value={g.mvp||""} onChange={e=>setField("mvp",e.target.value)} style={{...inp,marginTop:2}}>
+            <option value="">— à désigner —</option>
+            {g.roster.map(p=><option key={p.id} value={p.id}>{dispName(p)}</option>)}</select></label>
+        <label style={{flex:1}}><span style={{fontSize:10,color:T.us}}>🥄 Cuillère en bois</span>
+          <select value={g.spoon||""} onChange={e=>setField("spoon",e.target.value)} style={{...inp,marginTop:2}}>
+            <option value="">— à désigner —</option>
+            {g.roster.map(p=><option key={p.id} value={p.id}>{dispName(p)}</option>)}</select></label>
+      </div>
+      <div style={{marginTop:8}}>
+        <span style={{fontSize:10,color:T.dim}}>📝 Note / annotation</span>
+        <textarea value={g.note||""} onChange={e=>setField("note",e.target.value)} rows={2}
+          placeholder="Un mot sur la Ryder (anecdote, météo, pari perdu…)"
+          style={{...inp,marginTop:2,resize:"vertical",fontFamily:"inherit",lineHeight:1.4}}/>
+      </div>
+    </div>}
 
     {teamsFormed&&<button onClick={toggleDone} style={{...addBtn,marginTop:10,
       background:g.done?T.line:T.gold,color:g.done?T.text:"#1a1200"}}>
@@ -2811,6 +2834,13 @@ function GameDetail({g,members,courses,games,setGames,back,openGame}){
         const validateBtn=<button onClick={toggleDone} style={{...addBtn,background:g.done?T.line:T.accent,
           color:g.done?T.text:"#04150b"}}>{g.done?"↩ Rouvrir":"✅ Valider (révéler résultats)"}</button>;
         const boards=<>
+          {/* note libre pour annoter la partie (à la clôture ou après) */}
+          <div style={{marginTop:12}}>
+            <span style={{fontSize:10,color:T.dim,textTransform:"uppercase",letterSpacing:.5,fontWeight:700}}>📝 Note</span>
+            <textarea value={g.note||""} onChange={e=>save({...g,note:e.target.value})} rows={2}
+              placeholder="Annoter cette partie (anecdote, conditions, pari…)"
+              style={{...inp,marginTop:2,resize:"vertical",fontFamily:"inherit",lineHeight:1.4}}/>
+          </div>
           {g.subtype==="ryder"&&<RyderBoard g={g} courses={courses} playerById={playerById}/>}
           {g.type==="event"&&g.subtype!=="ryder"&&g.subtype!=="coupe"&&g.done&&<EventBoard g={g} courses={courses} playerById={playerById}/>}
           {g.done&&<ShareResults g={g} courses={courses} playerById={playerById}/>}
