@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, deleteGameByDataId, dedupeGamesC
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.73 · Ryder conteneur + rattachement"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.74 · Ryder 8/1 + FAQ à jour"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -872,8 +872,12 @@ function FaqTab(){
       ["👥 Membres & invités","Les membres G&A restent en pastilles. Les anciens invités sont rangés dans une liste déroulante « + Ajouter un ancien invité » pour ne pas encombrer. Tu peux aussi créer un invité à la volée."],
       ["🤝 Les équipes (2 contre 2)","Pour une formule 2v2 (Fourball, Mexicaine, Scramble, Foursome, Match Play 2v2), une section « Les équipes » te fait désigner qui joue avec qui : Équipe 1 / Équipe 2 (2 joueurs chacune)."],
       ["✍️ Le scoreur","Dans chaque partie on désigne qui « tient la carte » (le scoreur). À plusieurs parties en parallèle, chacune a SON scoreur ; lui seul saisit les scores."],
-      ["👀 Suivre en direct","Les autres ouvrent la même partie et suivent le score en lecture seule. Le tableau se met à jour À CHAQUE TROU VALIDÉ → tout le monde voit l'avancement en temps réel, sans attendre la fin."],
-      ["🗺️ Les parcours","15 parcours préchargés. Chacun peut en CRÉER (recherche GolfCourseAPI ou saisie à la main) et CORRIGER un par / HCP / slope inexact (mémorisé pour toujours) — soyez rigoureux 🙏. Seul l'organisateur peut SUPPRIMER un parcours."],
+      ["👀 Suivre en direct + une partie à la fois","Les autres ouvrent la même partie et suivent en lecture seule, mis à jour À CHAQUE TROU VALIDÉ. Quand il y a plusieurs parties (tournoi, ou + de 4 joueurs), on n'affiche QUE la prochaine où tu joues ; dès qu'elle est finie, la suivante apparaît. Tu peux toujours revenir à la liste des parties pour entrer dans n'importe laquelle (terminée ou à venir)."],
+      ["📈 Onglet Suivi score","Dans une partie, l'onglet 📈 Suivi score trace la confrontation trou par trou : statut match play (1 UP / All Square / 1 DOWN avec échelle), points cumulés (mexicaine, chouette, stableford…), le tout dans un repère avec l'abscisse en numéros de trous (1 → dernier validé → 18)."],
+      ["🗂️ Plus de 4 joueurs","Une partie amicale accepte + de 4 joueurs : l'appli propose des CONFIGURATIONS (ex. à 6 : 4+2, 3+3 ou 2+2+2), une formule par sous-partie, et tu affectes les joueurs. Modifiable même APRÈS création (tant qu'aucun score n'est saisi) via « ⚙️ Reconfigurer les parties »."],
+      ["🧪 Parties de test","À la création, une case « 🧪 Partie de test » crée une partie qui NE COMPTE PAS au classement (badge TEST violet). Pratique pour s'entraîner sur l'appli. (Réservé surtout aux essais.)"],
+      ["📜 Mes parties / Toutes","Onglet Historique : un sélecteur « Mes parties / Toutes » filtre la liste. Les Ryder ressortent en DORÉ. Supprimer une partie retire automatiquement ses points du classement."],
+      ["🗺️ Les parcours","15 parcours préchargés (Nans par défaut, effacé au clic pour taper un autre). Chacun peut en CRÉER (recherche GolfCourseAPI ou saisie à la main) et CORRIGER un par / HCP / slope (mémorisé) — soyez rigoureux 🙏. Seul l'organisateur peut SUPPRIMER un parcours."],
     ]],
     ["🎮 Les formules de jeu",[
       ["🎯 2 niveaux de points","Deux choses distinctes : (1) le RÉSULTAT de la partie — qui gagne, dans le langage de la formule ; (2) les POINTS DE SAISON — un système de DUELS identique pour TOUTES les formules, qui alimente le classement. Une partie non validée = 0 point. (Net = brut − coups rendus.)"],
@@ -883,9 +887,11 @@ function FaqTab(){
     ]],
     ["🏅 Le championnat",[
       ["🏅 Les points de saison (duels)","On compte les DUELS (qui bat qui) : 1v1 → Victoire 3 · Nul 1 · Défaite 0. À 3 → 2 duels (V 2) : battre les 2 = 4. Double 2v2 → V 3 chacun. Indépendant de la formule de jeu."],
-      ["⚖️ Qui compte au classement ?","Tout le monde peut jouer (invités compris), mais une confrontation ne RAPPORTE des points de saison que s'il y a AU MOINS 2 membres G&A dedans. Sinon la partie se joue normalement mais reste « hors classement » (c'est indiqué en fin de partie)."],
-      ["🏆 Les modes de tournoi","Onglet Nouvelle → Tournoi, 3 modes : • 🏆 RYDER CUP : 2 équipes, tirage en chapeaux de 2 (par index), confrontations équilibrées proposées et formules variées par manche, scoreboard façon EUR-USA. On est SOLIDAIRES (on gagne/perd ensemble). • 🥊 MINICUP : élimination directe en 1v1, tirage aléatoire, le gagnant avance jusqu'à la finale (format des duels choisi à la création). • 🏅 MINICHAMP : Intégral (cumul de points sur les manches, +5 au vainqueur) — les Poules arrivent bientôt."],
-      ["📊 Deux classements","« Cumulé » (qui joue plus marque plus) et « Moyenne par partie » (pour que ceux qui jouent peu aient leur chance). + le bilan des confrontations directes entre potes."],
+      ["⚖️ Qui compte au classement ?","Tout le monde peut jouer (invités compris), mais une confrontation ne RAPPORTE des points de saison que s'il y a AU MOINS 2 membres G&A dedans. ⚠️ Les INVITÉS ne marquent JAMAIS (ni en partie, ni à la Ryder)."],
+      ["🏆 RYDER CUP (nouveau : conteneur + rattachement)","Onglet Nouvelle → Tournoi → Ryder Cup. Une Ryder est un CONTENEUR léger : titre, dates (ex. 27→29/06/26), participants (avec index), 2 équipes nommables (tirage équilibré par index OU à la main). ENSUITE, tu crées tes parties NORMALEMENT et tu choisis « Rattacher à : cette Ryder ». Dans la Ryder tu vois : les équipes, un SCOREBOARD qui avance après chaque partie rattachée validée, et UNE LIGNE PAR PARTIE (format + joueurs + résultat) → un tap ouvre la partie (consulter / saisir / voir la config). Bouton « 🏁 Clôturer la Ryder » = on sanctuarise : +8 points à chaque membre de l'équipe GAGNANTE, +1 à chaque membre de l'équipe perdante (les parties rattachées ne donnent pas de points en plus, elles servent au scoreboard)."],
+      ["🥊 MINICUP / 🏅 MINICHAMP","• 🥊 MINICUP : élimination directe en 1v1, tirage aléatoire, le gagnant avance jusqu'à la finale. • 🏅 MINICHAMP : Intégral (cumul de points sur les manches, +5 au vainqueur). Les Poules arrivent bientôt."],
+      ["📊 Deux classements + détail","« Cumulé » (qui joue plus marque plus) et « Moyenne par partie ». En bas, « 🔎 Détail des points » : tape un joueur pour voir, partie par partie, d'où viennent ses points. + le bilan des confrontations directes entre potes."],
+      ["🏆 Ryder gagnées & accueil","Chaque compte affiche son nombre de 🏆 Ryder Cups gagnées (dérivé de l'historique). Sur l'écran « Qui es-tu ? », les vainqueurs de la dernière Ryder sont mis en avant en haut, surlignés en or avec une coupe 🏆."],
     ]],
     ["📲 Communication & réglages",[
       ["💬 Partage WhatsApp","À la validation du 18e trou : le résultat de la formule + une fiche par joueur (médaille + Stableford BRUT et NET) + l'évolution au classement (points gagnés, rang, ▲/▼ places). Tu partages tout au groupe en un clic. Si la partie ne compte pas (moins de 2 membres), c'est précisé."],
@@ -1739,17 +1745,18 @@ function computeStandings(done, courses){
   const counts=ps=>ps.filter(isMember).length>=2;
   done.forEach(g=>{
     if(g.test) return;           // partie de TEST → jamais comptabilisée au classement
+    if(g.eventId) return;        // partie RATTACHÉE à une Ryder → ses points viennent de la Ryder (8/1)
     if(g.isContainer){
-      // CONTENEUR Ryder : les parties RATTACHÉES donnent déjà leurs points (parties normales).
-      // Ici on ajoute seulement le TROPHÉE (+5 à l'équipe championne) et la PRIME de présence
-      // (+1 aux membres présents non champions). Champion = équipe qui a gagné le + de parties.
+      // CONTENEUR Ryder CLÔTURÉ : on sanctuarise le résultat. Les parties rattachées ne donnent
+      // PAS de points individuels (elles servent au scoreboard) ; c'est la Ryder qui attribue
+      // 8 points à CHAQUE membre de l'équipe gagnante et 1 à chaque membre de l'équipe perdante.
       const tw=[0,0];
       done.filter(x=>String(x.eventId)===String(g.id)).forEach(pt=>{const w=partieTeamWinner(pt,courses);if(w!=null)tw[w]++;});
       const champ=tw[0]>tw[1]?0:tw[1]>tw[0]?1:null;
       const gp={};
-      if(champ!=null) (g.roster||[]).forEach(p=>{ if(p.team===champ&&isMember(p)){ ensure(p.id).pts+=5; gp[p.id]=5; } });
       (g.roster||[]).forEach(p=>{ if((p.team!==0&&p.team!==1)||!isMember(p)) return;
-        if((gp[p.id]||0)>0) return; ensure(p.id).pts+=1; gp[p.id]=1; });
+        const add = champ==null ? 1 : (p.team===champ ? 8 : 1);
+        ensure(p.id).pts+=add; gp[p.id]=add; });
       Object.entries(gp).forEach(([id,pt])=>detail(id,g.id,g.name,pt));
       return;
     }
@@ -1818,9 +1825,9 @@ function computeStandings(done, courses){
     }
     Object.entries(gamePts).forEach(([id,pt])=>detail(id,g.id,g.name,pt));
   });
-  // « parties jouées » = nombre de PARTIES distinctes (hors conteneurs Ryder) → moyenne juste
-  const containerIds=new Set((done||[]).filter(g=>g.isContainer).map(g=>String(g.id)));
-  Object.keys(S).forEach(id=>{ S[id].played=(D[id]||[]).filter(d=>!containerIds.has(String(d.id))).length; });
+  // « parties jouées » = nombre d'entrées distinctes (une Ryder clôturée = 1 ; ses parties
+  // rattachées ne comptent pas individuellement) → moyenne juste.
+  Object.keys(S).forEach(id=>{ S[id].played=(D[id]||[]).length; });
   return {S,H,D};
 }
 
@@ -1843,7 +1850,7 @@ function seasonImpact(g, games, courses){
   }).sort((x,y)=>(x.rank||99)-(y.rank||99)); // ordre du classement général
   // la partie compte-t-elle au classement ? (≥2 membres dans au moins une confrontation)
   const subs=g.rounds?g.rounds.flatMap(r=>r.subgames||[]):(g.subgames||[]);
-  const counted=!g.test && gameComplete(g) && subs.some(sg=>(sg.players||[]).map(id=>(g.roster||[]).find(p=>p.id===id))
+  const counted=!g.test && !g.eventId && gameComplete(g) && subs.some(sg=>(sg.players||[]).map(id=>(g.roster||[]).find(p=>p.id===id))
     .filter(Boolean).filter(isMember).length>=2);
   return {lines,counted};
 }
@@ -2612,6 +2619,17 @@ function RyderContainerView({g,games,courses,members,save,back,openGame}){
     <Section>{g.name}</Section>
     {(g.datesFrom||g.datesTo)&&<div style={{fontSize:12,color:T.dim,marginBottom:8}}>📅 {g.datesFrom}{g.datesTo?` → ${g.datesTo}`:""}</div>}
 
+    {/* Participants avec index */}
+    <div style={{...card(T.line),marginBottom:12}}>
+      <div style={{fontSize:10,color:T.dim,marginBottom:6,textTransform:"uppercase",
+        letterSpacing:.5,fontWeight:700}}>Participants ({g.roster.length})</div>
+      <div style={{display:"flex",flexWrap:"wrap",gap:"5px 12px"}}>
+        {g.roster.map(p=>(<span key={p.id} style={{fontSize:12,fontWeight:700,display:"flex",alignItems:"center",gap:4}}>
+          {p.team===0&&<span style={{color:T.eu}}>●</span>}{p.team===1&&<span style={{color:T.us}}>●</span>}
+          {dispName(p)} <span style={{color:T.dim,fontSize:10,fontWeight:400}}>idx {p.index}</span></span>))}
+      </div>
+    </div>
+
     {!g.done&&!teamsFormed&&<DrawHats g={g} onAssign={applyDraw}/>}
 
     {teamsFormed&&<div style={{display:"flex",gap:10,marginBottom:12}}>
@@ -2621,9 +2639,11 @@ function RyderContainerView({g,games,courses,members,save,back,openGame}){
           background:win?`${T.gold}1a`:`${(ti===0?T.eu:T.us)}14`}}>
           <div style={{fontSize:12,fontWeight:800,color:win?T.gold:T.text}}>{win&&"🏆 "}{teamNames[ti]}</div>
           <div style={{fontFamily:"Anton",fontSize:30}}>{tw[ti]}</div>
-          <div style={{fontSize:10,color:T.dim}}>{g.roster.filter(p=>p.team===ti).map(dispName).join(" · ")}</div>
+          <div style={{fontSize:10,color:T.dim}}>{g.roster.filter(p=>p.team===ti).map(p=>`${dispName(p)} (${p.index})`).join(" · ")}</div>
         </div>);})}
     </div>}
+    {teamsFormed&&<div style={{fontSize:11,color:T.dim,textAlign:"center",marginTop:-4,marginBottom:12}}>
+      Scoreboard mis à jour après chaque partie rattachée validée. À la clôture : <b style={{color:T.gold}}>8 pts</b> aux gagnants, <b style={{color:T.text}}>1 pt</b> aux perdants.</div>}
 
     {!g.done&&teamsFormed&&<div style={{...card(T.line),marginBottom:12}}>
       <button onClick={()=>setShowTeams(s=>!s)} style={{background:"none",border:"none",color:T.text,
@@ -2651,7 +2671,9 @@ function RyderContainerView({g,games,courses,members,save,back,openGame}){
 
     {teamsFormed&&<button onClick={toggleDone} style={{...addBtn,marginTop:10,
       background:g.done?T.line:T.gold,color:g.done?T.text:"#1a1200"}}>
-      {g.done?"↩ Rouvrir la Ryder":"🏁 Clôturer la Ryder (attribuer le trophée)"}</button>}
+      {g.done?"↩ Rouvrir la Ryder":"🏁 Clôturer la Ryder · 8 pts aux gagnants, 1 aux perdants"}</button>}
+    {g.done&&<div style={{fontSize:11,color:T.accent,textAlign:"center",marginTop:6}}>
+      ✅ Résultat sanctuarisé — points ajoutés au championnat.</div>}
   </div>);
 }
 function GameDetail({g,members,courses,games,setGames,back,openGame}){
