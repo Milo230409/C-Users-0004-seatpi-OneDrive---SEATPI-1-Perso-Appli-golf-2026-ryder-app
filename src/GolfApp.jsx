@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, deleteGameByDataId, dedupeGamesC
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.81 · simple confirmation"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.83 · Ryder = 1 partie (3 en moyenne)"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -1658,8 +1658,11 @@ function incompleteSubs(g){
 }
 
 function computeStandings(done, courses){
-  const S={}, H={}, D={}; // D : id -> [{id,name,pts,event}] détail des points par partie
-  const detail=(id,gid,name,pts,event)=>{(D[id]=D[id]||[]).push({id:gid,name,pts,event:!!event});};
+  const S={}, H={}, D={}; // D : id -> [{id,name,pts,cumul,avg}] détail des points par partie
+  // cumul : compte au CUMULÉ · avg : compte à la MOYENNE. Par défaut les deux.
+  // Standalone → les deux · Ryder conteneur (8/1) → cumul seul · partie rattachée → avg seul.
+  const detail=(id,gid,name,pts,opts={})=>{(D[id]=D[id]||[]).push({id:gid,name,pts,
+    cumul:opts.cumul!==false, avg:opts.avg!==false});};
   // sécurité : on ne compte chaque partie qu'UNE fois (au cas où un doublon traînerait)
   {const seen=new Set();done=(done||[]).filter(g=>{const k=String(g.id);
     if(seen.has(k))return false;seen.add(k);return true;});}
@@ -1670,20 +1673,21 @@ function computeStandings(done, courses){
   const counts=ps=>ps.filter(isMember).length>=2;
   done.forEach(g=>{
     if(g.test) return;           // partie de TEST → jamais comptabilisée au classement
-    if(g.eventId) return;        // partie RATTACHÉE à une Ryder → ses points viennent de la Ryder (8/1)
+    if(g.eventId) return;        // partie RATTACHÉE → sert au scoreboard ; ne compte PAS individuellement
     if(g.isContainer){
-      // CONTENEUR Ryder CLÔTURÉ : on sanctuarise le résultat. Les parties rattachées ne donnent
-      // PAS de points individuels (elles servent au scoreboard) ; c'est la Ryder qui attribue
-      // 8 points à CHAQUE membre de l'équipe gagnante et 1 à chaque membre de l'équipe perdante.
+      // CONTENEUR Ryder CLÔTURÉ : une Ryder = 1 partie. Les parties rattachées servent au scoreboard.
+      // Gagnant : 8 = 3 (composante « victoire », compte à la MOYENNE) + 5 (trophée, CUMULÉ seul).
+      // Perdant : 1 (présence, CUMULÉ seul) · sa composante moyenne = 0. Une Ryder = 1 partie partout.
       const tw=[0,0];
       done.filter(x=>String(x.eventId)===String(g.id)).forEach(pt=>{const w=partieTeamWinner(pt,courses);if(w!=null)tw[w]++;});
       const champ=tw[0]>tw[1]?0:tw[1]>tw[0]?1:null;
-      const gp={};
       (g.roster||[]).forEach(p=>{ if((p.team!==0&&p.team!==1)||!isMember(p)) return;
-        const add = champ==null ? 1 : (p.team===champ ? 8 : 1);
-        ensure(p.id).pts+=add; gp[p.id]=add; });
-      // event:true → ces points (8/1) comptent au CUMULÉ mais PAS dans la moyenne/partie.
-      Object.entries(gp).forEach(([id,pt])=>detail(id,g.id,g.name,pt,true));
+        const cumAdd = champ==null ? 1 : (p.team===champ ? 8 : 1); // CUMULÉ : 8 / 1
+        const avgAdd = champ==null ? 1 : (p.team===champ ? 3 : 0); // MOYENNE : 3 (gagnant) / 0 (perdant)
+        ensure(p.id).pts+=cumAdd;
+        detail(p.id,g.id,g.name,cumAdd,{avg:false});   // entrée CUMULÉ (8/1)
+        detail(p.id,g.id,g.name,avgAdd,{cumul:false});  // entrée MOYENNE (3/0) — compte comme 1 partie
+      });
       return;
     }
     if(!gameComplete(g)) return; // partie non disputée / 18 trous non remplis → 0 point
@@ -1716,7 +1720,7 @@ function computeStandings(done, courses){
       // PRIME DE PARTICIPATION : un MEMBRE présent qui a tout perdu repart avec 1 point
       // (il mérite plus que ceux qui ne sont pas venus = 0). Les invités ne marquent jamais.
       Object.keys(gp).forEach(id=>{ if(gp[id]===0 && S[id]){ S[id].pts+=1; gp[id]=1; } });
-      Object.entries(gp).forEach(([id,pt])=>detail(id,g.id,g.name,pt));
+      Object.entries(gp).forEach(([id,pt])=>detail(id,g.id,g.name,pt,{avg:false})); // ancien Ryder : cumulé seul
       return;
     }
     // INDIVIDUEL (amicale ou tournoi individuel) : points par duels + confrontations + bonus
@@ -1733,7 +1737,7 @@ function computeStandings(done, courses){
       Object.entries(pts).forEach(([id,pt])=>{
         const pl=psAll.find(p=>String(p.id)===String(id));
         if(!isMember(pl)) return; // les INVITÉS ne marquent jamais
-        const s=ensure(id);s.pts+=pt;s.played++;gamePts[id]=(gamePts[id]||0)+pt;
+        const s=ensure(id); s.pts+=pt; s.played++; gamePts[id]=(gamePts[id]||0)+pt;
         const r=res?.[id];
         if(r==='W')s.win++;else if(r==='D')s.draw++;else s.loss++;});
       h2h.forEach(({a,b,res})=>{
@@ -1751,12 +1755,13 @@ function computeStandings(done, courses){
     }
     Object.entries(gamePts).forEach(([id,pt])=>detail(id,g.id,g.name,pt));
   });
-  // Compteurs : « played » = toutes les entrées (pour le CUMULÉ). La MOYENNE/partie se calcule
-  // HORS Ryder (event) : un Ryder vaut 8 pts mais ne doit pas gonfler la moyenne. → avgPts/avgPlayed.
-  Object.keys(S).forEach(id=>{ const ds=D[id]||[]; S[id].played=ds.length;
-    const norm=ds.filter(d=>!d.event);
-    S[id].avgPlayed=norm.length;
-    S[id].avgPts=norm.reduce((a,d)=>a+(d.pts||0),0); });
+  // Compteurs : CUMULÉ = entrées cumul (parties + Ryder 8/1). MOYENNE = entrées avg (parties +
+  // Ryder pour 3/0). Une Ryder compte comme 1 partie partout ; ses 5 pts de trophée sont hors moyenne.
+  Object.keys(S).forEach(id=>{ const ds=D[id]||[];
+    const cum=ds.filter(d=>d.cumul), avg=ds.filter(d=>d.avg);
+    S[id].played=cum.length;                       // parties au CUMULÉ
+    S[id].avgPlayed=avg.length;                    // parties à la MOYENNE (rattachées comprises)
+    S[id].avgPts=avg.reduce((a,d)=>a+(d.pts||0),0); });
   return {S,H,D};
 }
 
