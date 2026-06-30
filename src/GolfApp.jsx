@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, deleteGameByDataId, dedupeGamesC
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.75 · menu simplifié + Ryder sans parcours"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.76 · entrées dédiées amicale/tournoi"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -1310,11 +1310,11 @@ function NewGame({setTab}){
   return (
     <div>
       <Section>{type==="simple"?"Nouvelle partie amicale":subtype==="ryder"?"Nouvelle Ryder Cup":"Nouveau tournoi"}</Section>
-      <div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:8}}>
-        <Pill active={type==="simple"} onClick={()=>setType("simple")}>⛳ Partie amicale</Pill>
-        <Pill active={type==="event"&&subtype==="ryder"} onClick={()=>{setType("event");setSubtype("ryder");}}>🏆 Ryder Cup</Pill>
-        <Pill active={type==="event"&&subtype!=="ryder"} onClick={()=>{setType("event");setSubtype("simple");}}>🏅 Tournoi</Pill>
-      </div>
+      {/* Amicale : aucun choix (c'est décidé à l'accueil). Tournoi : Ryder Cup OU Tournoi. */}
+      {type==="event"&&<div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:8}}>
+        <Pill active={subtype==="ryder"} onClick={()=>setSubtype("ryder")}>🏆 Ryder Cup</Pill>
+        <Pill active={subtype!=="ryder"} onClick={()=>setSubtype("simple")}>🏅 Tournoi</Pill>
+      </div>}
       {type==="event"&&subtype==="ryder"&&<div style={{...card(T.us),fontSize:12,
         color:T.dim,marginBottom:4,lineHeight:1.5}}>
         🏆 <b style={{color:T.text}}>Ryder Cup</b> : participants + 2 équipes + dates. Tu crées
