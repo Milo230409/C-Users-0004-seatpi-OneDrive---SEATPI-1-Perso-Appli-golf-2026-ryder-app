@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, deleteGameByDataId, dedupeGamesC
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.80 · moyenne hors Ryder"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.81 · simple confirmation"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -2391,25 +2391,21 @@ function History({openId,onConsumeOpen}){
   const loadDemos=()=>{
     const demos=makeTestGames(members,courses);
     if(!demos.length) return alert("Il faut au moins 4 joueurs préchargés pour générer les parties de test.");
-    if(!confirm("Charger 5 parties de TEST (match play, chouette, stableford, fourball, mexicaine) déjà jouées ?")) return;
-    if(!confirm("Confirmer ? Elles sont marquées 🧪 TEST (hors classement) et supprimables à tout moment.")) return;
+    if(!confirm("Charger 5 parties de TEST (hors classement, supprimables) ?")) return;
     setGames([...demos,...games]); setScope("all");
   };
   const onCreateRyder=(newGames)=>{ // newGames = [conteneur, partie1, partie2]
-    if(!confirm("Créer une Ryder de démo (new look) : 1 conteneur + 2 parties rattachées ?")) return;
-    if(!confirm("Confirmer ? Elle est clôturée → 8 pts aux gagnants, 1 aux perdants au classement (supprimable).")) return;
+    if(!confirm("Créer une Ryder de démo (1 conteneur + 2 parties rattachées, 8/1 au classement) ?")) return;
     setGames([...newGames,...games]); setShowRyder(false); setScope("all");
   };
   const doCleanup=async()=>{
-    if(!confirm("Nettoyer les doublons de parties dans le cloud ?")) return;
-    if(!confirm("Confirmer le nettoyage des doublons (réparation du classement) ?")) return;
+    if(!confirm("Nettoyer les doublons de parties dans le cloud (réparation du classement) ?")) return;
     setCleaning("…");
     const n=await cleanupDuplicates();
     setCleaning(n>0?`✅ ${n} doublon(s) supprimé(s)`:"✅ Aucun doublon");
     setTimeout(()=>setCleaning(""),3000); };
   const doClearAll=async()=>{
-    if(!confirm("Supprimer DÉFINITIVEMENT TOUTES les parties et repartir à zéro ?\n(le classement sera vidé — utile pour effacer les parties de test)")) return;
-    if(!confirm("Es-tu sûr ? Cette action est irréversible.")) return;
+    if(!confirm("⚠️ Supprimer DÉFINITIVEMENT TOUTES les parties et repartir à zéro ? (irréversible, le classement sera vidé)")) return;
     await clearAllGames(); };
   useEffect(()=>{ if(openId){ setOpen(openId); onConsumeOpen&&onConsumeOpen(); } },[openId]);
   const isMember=p=>p.member===true||/^seed-/.test(String(p.id));
