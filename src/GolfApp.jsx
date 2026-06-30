@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, deleteGameByDataId, dedupeGamesC
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.76 · entrées dédiées amicale/tournoi"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.77 · amicale 2-4 + FAQ nettoyée"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -874,8 +874,8 @@ function FaqTab(){
       ["✍️ Le scoreur","Dans chaque partie on désigne qui « tient la carte » (le scoreur). À plusieurs parties en parallèle, chacune a SON scoreur ; lui seul saisit les scores."],
       ["👀 Suivre en direct + une partie à la fois","Les autres ouvrent la même partie et suivent en lecture seule, mis à jour À CHAQUE TROU VALIDÉ. Quand il y a plusieurs parties (tournoi, ou + de 4 joueurs), on n'affiche QUE la prochaine où tu joues ; dès qu'elle est finie, la suivante apparaît. Tu peux toujours revenir à la liste des parties pour entrer dans n'importe laquelle (terminée ou à venir)."],
       ["📈 Onglet Suivi score","Dans une partie, l'onglet 📈 Suivi score trace la confrontation trou par trou : statut match play (1 UP / All Square / 1 DOWN avec échelle), points cumulés (mexicaine, chouette, stableford…), le tout dans un repère avec l'abscisse en numéros de trous (1 → dernier validé → 18)."],
-      ["🗂️ Plus de 4 joueurs","Une partie amicale accepte + de 4 joueurs : l'appli propose des CONFIGURATIONS (ex. à 6 : 4+2, 3+3 ou 2+2+2), une formule par sous-partie, et tu affectes les joueurs. Modifiable même APRÈS création (tant qu'aucun score n'est saisi) via « ⚙️ Reconfigurer les parties »."],
-      ["🧪 Parties de test","À la création, une case « 🧪 Partie de test » crée une partie qui NE COMPTE PAS au classement (badge TEST violet). Pratique pour s'entraîner sur l'appli. (Réservé surtout aux essais.)"],
+      ["🔢 Combien de joueurs ?","Partie amicale = 2 à 4 joueurs (entre potes). À partir de 5 joueurs, reviens à l'accueil et choisis Tournoi / Ryder."],
+      ["🧪 Parties de test","Pour t'entraîner sur l'appli sans polluer le classement, l'organisateur peut charger 5 parties de test (bouton dans l'Historique) — badge TEST violet, hors classement, supprimables à tout moment."],
       ["📜 Mes parties / Toutes","Onglet Historique : un sélecteur « Mes parties / Toutes » filtre la liste. Les Ryder ressortent en DORÉ. Supprimer une partie retire automatiquement ses points du classement."],
       ["🗺️ Les parcours","15 parcours préchargés (Nans par défaut, effacé au clic pour taper un autre). Chacun peut en CRÉER (recherche GolfCourseAPI ou saisie à la main) et CORRIGER un par / HCP / slope (mémorisé) — soyez rigoureux 🙏. Seul l'organisateur peut SUPPRIMER un parcours."],
     ]],
@@ -889,7 +889,7 @@ function FaqTab(){
       ["🏅 Les points de saison (duels)","On compte les DUELS (qui bat qui) : 1v1 → Victoire 3 · Nul 1 · Défaite 0. À 3 → 2 duels (V 2) : battre les 2 = 4. Double 2v2 → V 3 chacun. Indépendant de la formule de jeu."],
       ["⚖️ Qui compte au classement ?","Tout le monde peut jouer (invités compris), mais une confrontation ne RAPPORTE des points de saison que s'il y a AU MOINS 2 membres G&A dedans. ⚠️ Les INVITÉS ne marquent JAMAIS (ni en partie, ni à la Ryder)."],
       ["🏆 RYDER CUP (nouveau : conteneur + rattachement)","Onglet Nouvelle → Tournoi → Ryder Cup. Une Ryder est un CONTENEUR léger : titre, dates (ex. 27→29/06/26), participants (avec index), 2 équipes nommables (tirage équilibré par index OU à la main). ENSUITE, tu crées tes parties NORMALEMENT et tu choisis « Rattacher à : cette Ryder ». Dans la Ryder tu vois : les équipes, un SCOREBOARD qui avance après chaque partie rattachée validée, et UNE LIGNE PAR PARTIE (format + joueurs + résultat) → un tap ouvre la partie (consulter / saisir / voir la config). Bouton « 🏁 Clôturer la Ryder » = on sanctuarise : +8 points à chaque membre de l'équipe GAGNANTE, +1 à chaque membre de l'équipe perdante (les parties rattachées ne donnent pas de points en plus, elles servent au scoreboard)."],
-      ["🥊 MINICUP / 🏅 MINICHAMP","• 🥊 MINICUP : élimination directe en 1v1, tirage aléatoire, le gagnant avance jusqu'à la finale. • 🏅 MINICHAMP : Intégral (cumul de points sur les manches, +5 au vainqueur). Les Poules arrivent bientôt."],
+      ["🏅 Tournoi","Nouvelle → Tournoi : plusieurs manches (chacune son parcours), mêmes équipes possibles, cumul des points sur l'ensemble et +5 au vainqueur. Idéal pour 5+ joueurs quand ce n'est pas une Ryder."],
       ["📊 Deux classements + détail","« Cumulé » (qui joue plus marque plus) et « Moyenne par partie ». En bas, « 🔎 Détail des points » : tape un joueur pour voir, partie par partie, d'où viennent ses points. + le bilan des confrontations directes entre potes."],
       ["🏆 Ryder gagnées & accueil","Chaque compte affiche son nombre de 🏆 Ryder Cups gagnées (dérivé de l'historique). Sur l'écran « Qui es-tu ? », les vainqueurs de la dernière Ryder sont mis en avant en haut, surlignés en or avec une coupe 🏆."],
     ]],
@@ -1250,16 +1250,8 @@ function NewGame({setTab}){
           eventId,hcpRelative,teamNames:evTeams||(team2v2?["Équipe 1","Équipe 2"]:null),done:false,created:Date.now()};
         setGames([game,...games]);setTab("history");return;
       }
-      // PLUS de 4 joueurs : plusieurs parties (flights) selon la configuration choisie
-      const sp=split||autoSplit(n);
-      const flights=sp.map((grp,gi)=>({grp,gi,players:rosterF.filter(p=>flightOfP(p)===gi)}));
-      const bad=flights.find(f=>f.players.length!==f.grp.size);
-      if(bad) return alert(`Configuration incomplète : la partie ${bad.gi+1} doit compter ${bad.grp.size} joueurs (actuellement ${bad.players.length}). Ajuste l'affectation des joueurs.`);
-      const subgames=flights.map((f,i)=>({id:i+1,formula:f.grp.formula,
-        players:f.players.map(p=>p.id),scores:{},validated:[],done:false,hcpRelative}));
-      const game={id:Date.now(),name:finalName(),type,courseId,mode,roster:rosterF,subgames,test:isTest,
-        eventId,hcpRelative,teamNames:evTeams,done:false,created:Date.now()};
-      setGames([game,...games]);setTab("history");return;
+      // Partie amicale = 2 à 4 joueurs. Pour 5+, on passe par Tournoi / Ryder.
+      return alert("Partie amicale = 2 à 4 joueurs.\nPour 5 joueurs ou plus, reviens à l'accueil et choisis « Tournoi / Ryder ».");
     }
     if(subtype==="coupe"){
       if(!courseId) return alert("Choisis d'abord un parcours.");
@@ -1445,42 +1437,7 @@ function NewGame({setTab}){
               🌮 La <b style={{color:T.text}}>Mexicaine</b> se joue en <b style={{color:T.text}}>brut</b> :
               système de <b style={{color:T.text}}>points cumulés</b> (pas de net, pas de match play).</div>
           : decompteUI}
-      </>):(()=>{
-        // PLUS de 4 joueurs : on propose des configurations (ex. 6 → 4+2, 3+3, 2+2+2),
-        // une formule par sous-partie, et l'affectation déplaçable des joueurs.
-        const sp=split||autoSplit(n);
-        const setF=(gi,val)=>setSplit(sp.map((x,k)=>k===gi?{...x,formula:val}:x));
-        return (<>
-        <Section>1. Configuration ({n} joueurs)</Section>
-        <ConfigPicker n={n} current={sp} onPick={sizes=>{setSplit(applyConfig(sp,sizes));setFlightOf({});}}/>
-        {sp.map((grp,gi)=>{const cnt=flightCount(gi);const okC=cnt===grp.size;
-          return (<div key={gi} style={card(okC?T.accent:T.gold)}>
-            <div style={{fontWeight:800,marginBottom:6,display:"flex",justifyContent:"space-between"}}>
-              <span>Partie {gi+1} · {grp.size} joueurs</span>
-              <span style={{color:okC?T.accent:T.gold,fontSize:12}}>{cnt}/{grp.size}</span></div>
-            <select value={grp.formula} onChange={e=>setF(gi,e.target.value)} style={inp}>
-              {formulasFor(grp.size).map(f=><option key={f} value={f}>{FORMULA_LABELS[f]}</option>)}</select>
-          </div>);})}
-        <Section>2. Qui joue dans quelle partie ?</Section>
-        <div style={{fontSize:11,color:T.dim,marginBottom:6}}>Tape pour déplacer un joueur d'une partie à l'autre.</div>
-        {allPlayers.map(p=>(
-          <div key={p.id} style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
-            <span style={{flex:1,minWidth:0,fontWeight:700,fontSize:13,whiteSpace:"nowrap",
-              overflow:"hidden",textOverflow:"ellipsis"}}>{dispName(p)}</span>
-            <div style={{display:"flex",gap:4,flexShrink:0}}>
-              {sp.map((grp,gi)=>{const act=flightOfP(p)===gi;
-                return <button key={gi} onClick={()=>setFlightOf(o=>({...o,[p.id]:gi}))}
-                  style={{...chip,padding:"6px 10px",fontSize:12,
-                  border:`2px solid ${act?T.accent:T.line}`,background:act?T.panel2:T.panel,
-                  color:act?T.text:T.dim,fontWeight:act?800:600}}>P{gi+1}</button>;})}
-            </div>
-          </div>))}
-        {sp.some((grp,gi)=>flightCount(gi)!==grp.size)&&
-          <div style={{fontSize:11,color:T.gold,marginTop:2}}>⚠️ Chaque partie doit avoir son nombre exact de joueurs.</div>}
-        <Section>3. Décompte</Section>
-        {decompteUI}
-        </>);
-      })())}
+      </>):<Warn>Partie amicale = 2 à 4 joueurs. Pour 5 joueurs ou plus, reviens à l'accueil et choisis « Tournoi / Ryder ».</Warn>)}
 
       {/* RYDER (conteneur) : juste les dates + les noms d'équipes. Les parties se rattachent ensuite. */}
       {type==="event"&&subtype==="ryder"&&n>=2&&(<>
@@ -2803,7 +2760,6 @@ function GameDetail({g,members,courses,games,setGames,back,openGame}){
                 <TeamManager g={g} renameTeam={renameTeam} setTeam={setTeam}/>
               </div>}
             </div>)}
-          {!isTournament && (g.roster||[]).length>4 && !g.done && <ReconfigPanel g={g} save={save}/>}
         </>;
         const validateBtn=<button onClick={toggleDone} style={{...addBtn,background:g.done?T.line:T.accent,
           color:g.done?T.text:"#04150b"}}>{g.done?"↩ Rouvrir":"✅ Valider (révéler résultats)"}</button>;
