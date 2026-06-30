@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, deleteGameByDataId, dedupeGamesC
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.74 · Ryder 8/1 + FAQ à jour"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.75 · menu simplifié + Ryder sans parcours"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -1023,7 +1023,7 @@ function Home({setTab,staleCount,refreshStale,openGame}){
           background:`linear-gradient(160deg, ${T.gold}1a 0%, ${T.panel} 60%)`}}>
           <div style={{fontWeight:800}}>▶ {g.name}</div>
           <div style={{fontSize:11,color:T.dim}}>
-            {g.subtype==="ryder"?"Ryder Cup":g.subtype==="coupe"?"MiniCup":g.type==="event"?"MiniChamp":"Partie amicale"} ·
+            {g.subtype==="ryder"?"Ryder Cup":g.subtype==="coupe"?"MiniCup":g.type==="event"?"Tournoi":"Partie amicale"} ·
             {g.rounds?` ${g.rounds.length} manche(s)`:` ${g.subgames?.length||1} match(s)`} · en cours</div></div>)}</>}
 
       <Section>Raccourcis</Section>
@@ -1195,7 +1195,7 @@ function NewGame({setTab}){
   const finalName=()=>{
     const d=new Date(),z=n=>String(n).padStart(2,"0");
     const when=`${z(d.getDate())}/${z(d.getMonth()+1)}/${String(d.getFullYear()).slice(2)} · ${z(d.getHours())}h${z(d.getMinutes())}`;
-    const what=type==="event"?(subtype==="ryder"?"Ryder Cup":subtype==="coupe"?"MiniCup":"MiniChamp")
+    const what=type==="event"?(subtype==="ryder"?"Ryder Cup":subtype==="coupe"?"MiniCup":"Tournoi")
       :(type==="simple"&&n>4)?`${(split||autoSplit(n)).length} parties`:(FORMULA_SHORT[formula]||"Partie");
     const nb=brutOnly?"brut":(mode==="gross"?"brut":"net"); // l'info brut/net reste dans le titre
     return `${what} ${nb} · ${when}`;
@@ -1309,41 +1309,17 @@ function NewGame({setTab}){
 
   return (
     <div>
-      <Section>{type==="simple"?"Nouvelle partie amicale":"Nouveau tournoi"}</Section>
-      <div style={{display:"flex",gap:8,marginBottom:8}}>
-        <Pill active={type==="simple"} onClick={()=>setType("simple")}>Partie amicale</Pill>
-        <Pill active={type==="event"} onClick={()=>setType("event")}>Tournoi</Pill>
+      <Section>{type==="simple"?"Nouvelle partie amicale":subtype==="ryder"?"Nouvelle Ryder Cup":"Nouveau tournoi"}</Section>
+      <div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:8}}>
+        <Pill active={type==="simple"} onClick={()=>setType("simple")}>⛳ Partie amicale</Pill>
+        <Pill active={type==="event"&&subtype==="ryder"} onClick={()=>{setType("event");setSubtype("ryder");}}>🏆 Ryder Cup</Pill>
+        <Pill active={type==="event"&&subtype!=="ryder"} onClick={()=>{setType("event");setSubtype("simple");}}>🏅 Tournoi</Pill>
       </div>
-      {type==="event"&&<div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:8}}>
-        <Pill active={subtype==="ryder"} onClick={()=>setSubtype("ryder")}>🏆 Ryder Cup</Pill>
-        <Pill active={subtype==="coupe"} onClick={()=>setSubtype("coupe")}>🥊 MiniCup</Pill>
-        <Pill active={subtype==="simple"||subtype==="poule"} onClick={()=>setSubtype("simple")}>🏅 MiniChamp</Pill>
-      </div>}
-      {type==="event"&&(subtype==="simple"||subtype==="poule")&&
-        <div style={{display:"flex",gap:8,marginBottom:8}}>
-          <Pill active={subtype==="simple"} onClick={()=>setSubtype("simple")}>Intégral</Pill>
-          <Pill active={subtype==="poule"} onClick={()=>setSubtype("poule")}>Poules</Pill>
-        </div>}
-      {type==="event"&&subtype==="poule"&&<div style={{...card(T.gold),fontSize:12,
-        color:T.dim,marginBottom:4,lineHeight:1.5}}>
-        🧩 <b style={{color:T.text}}>Poules</b> : tirage en groupes, chacun joue les autres de sa
-        poule. <b style={{color:T.gold}}>🚧 En préparation</b> — pour l'instant choisis
-        <b style={{color:T.text}}> Intégral</b>, je livre les Poules juste après.</div>}
       {type==="event"&&subtype==="ryder"&&<div style={{...card(T.us),fontSize:12,
-        color:T.dim,marginBottom:4}}>
-        Ryder Cup : deux équipes, tirage en chapeaux (équilibré par index, totaux serrés)
-        à lancer dans le détail du tournoi, et cumul des points sur toutes les manches.</div>}
-      {type==="event"&&subtype==="coupe"&&<div style={{...card(T.gold),fontSize:12,
         color:T.dim,marginBottom:4,lineHeight:1.5}}>
-        🏆 MiniCup : <b style={{color:T.text}}>élimination directe en 1v1</b>. Tirage full aléatoire,
-        le gagnant avance, on se rapproche de la finale (Quarts → Demies → Finale). Choisis le
-        format des duels (le même pour tous) :
-        <select value={coupeFormula} onChange={e=>setCoupeFormula(e.target.value)}
-          style={{...inp,marginTop:6}}>
-          <option value="matchplay">Match Play (trou par trou)</option>
-          <option value="strokeplay_net">Stroke Play (plus petit score)</option>
-          <option value="stableford">Stableford (plus de points)</option>
-        </select></div>}
+        🏆 <b style={{color:T.text}}>Ryder Cup</b> : participants + 2 équipes + dates. Tu crées
+        ensuite tes parties normalement et tu les <b style={{color:T.text}}>rattaches</b> à la Ryder.
+        Clôture = <b style={{color:T.gold}}>8 pts</b> aux gagnants, <b style={{color:T.text}}>1</b> aux perdants.</div>}
 
       <div style={{...card(T.line),fontSize:12,color:T.dim,display:"flex",
         alignItems:"center",gap:8}}>
@@ -1354,7 +1330,7 @@ function NewGame({setTab}){
         <Section>Parcours</Section>
         <CourseAutocomplete courses={courses} setCourses={setCourses}
           courseId={courseId} setCourseId={setCourseId}/>
-      </>):(<>
+      </>):subtype==="ryder"?null:(<>
         <Section>Manches & parcours</Section>
         <div style={{fontSize:11,color:T.dim,marginBottom:6}}>
           Un tournoi = plusieurs manches, chacune sur son parcours. Mêmes équipes et
@@ -1577,14 +1553,6 @@ function NewGame({setTab}){
           {attachTo&&<div style={{fontSize:11,color:T.accent,marginTop:6}}>
             ✅ Comptera pour la Ryder — les équipes sont héritées du conteneur.</div>}
         </div>)}
-
-      <label style={{...card(isTest?T.gold:T.line),display:"flex",alignItems:"center",gap:10,
-        marginTop:14,cursor:"pointer"}}>
-        <input type="checkbox" checked={isTest} onChange={e=>setIsTest(e.target.checked)}
-          style={{width:18,height:18,accentColor:T.gold}}/>
-        <span style={{fontSize:13}}><b style={{color:isTest?T.gold:T.text}}>🧪 Partie de test</b>
-          <span style={{color:T.dim}}> — ne sera pas comptabilisée au classement</span></span>
-      </label>
 
       <button onClick={create} style={{...addBtn,fontFamily:"'Archivo',sans-serif",fontSize:17,
         letterSpacing:.5,marginTop:16}}>▶ CRÉER & DÉMARRER</button>
@@ -2504,7 +2472,7 @@ function History({openId,onConsumeOpen}){
             borderRadius:6,padding:"1px 5px",marginRight:6}}>TEST</span>}{ryder&&"🏆 "}{g.name}</div>
         <div style={{fontSize:11,color:T.dim,whiteSpace:"nowrap",overflow:"hidden",
           textOverflow:"ellipsis"}}>
-          {g.type==="event"?(g.subtype==="ryder"?"🏆 Ryder Cup":g.subtype==="coupe"?"🥊 MiniCup":"🏅 MiniChamp"):"⛳ Partie amicale"}
+          {g.type==="event"?(g.subtype==="ryder"?"🏆 Ryder Cup":g.subtype==="coupe"?"🥊 MiniCup":"🏅 Tournoi"):"⛳ Partie amicale"}
           {" · "}{(g.roster||[]).map(p=>dispName(p)).join(", ")}
           {" · "}{g.done?"terminé":"en cours"} · tap pour ouvrir</div>
       </div>
@@ -2925,7 +2893,7 @@ function ShareResults({g,courses,playerById}){
     const isTournament=!!g.rounds;
     const kind=g.subtype==="ryder"?"🏆 Ryder Cup"
       :g.subtype==="coupe"?"🥊 MiniCup"
-      :isTournament?"🏅 MiniChamp"
+      :isTournament?"🏅 Tournoi"
       :"⛳ Partie amicale";
     const D="—————————————";
     let t=`${kind}\n${g.name}\n${net?"Net":"Brut"}\n${D}\n`;
