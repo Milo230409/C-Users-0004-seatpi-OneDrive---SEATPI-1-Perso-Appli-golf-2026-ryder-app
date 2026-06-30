@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, deleteGameByDataId, dedupeGamesC
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.79 · classement robuste"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.80 · moyenne hors Ryder"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -1658,8 +1658,8 @@ function incompleteSubs(g){
 }
 
 function computeStandings(done, courses){
-  const S={}, H={}, D={}; // D : id -> [{id,name,pts}] détail des points par partie
-  const detail=(id,gid,name,pts)=>{(D[id]=D[id]||[]).push({id:gid,name,pts});};
+  const S={}, H={}, D={}; // D : id -> [{id,name,pts,event}] détail des points par partie
+  const detail=(id,gid,name,pts,event)=>{(D[id]=D[id]||[]).push({id:gid,name,pts,event:!!event});};
   // sécurité : on ne compte chaque partie qu'UNE fois (au cas où un doublon traînerait)
   {const seen=new Set();done=(done||[]).filter(g=>{const k=String(g.id);
     if(seen.has(k))return false;seen.add(k);return true;});}
@@ -1682,7 +1682,8 @@ function computeStandings(done, courses){
       (g.roster||[]).forEach(p=>{ if((p.team!==0&&p.team!==1)||!isMember(p)) return;
         const add = champ==null ? 1 : (p.team===champ ? 8 : 1);
         ensure(p.id).pts+=add; gp[p.id]=add; });
-      Object.entries(gp).forEach(([id,pt])=>detail(id,g.id,g.name,pt));
+      // event:true → ces points (8/1) comptent au CUMULÉ mais PAS dans la moyenne/partie.
+      Object.entries(gp).forEach(([id,pt])=>detail(id,g.id,g.name,pt,true));
       return;
     }
     if(!gameComplete(g)) return; // partie non disputée / 18 trous non remplis → 0 point
@@ -1750,9 +1751,12 @@ function computeStandings(done, courses){
     }
     Object.entries(gamePts).forEach(([id,pt])=>detail(id,g.id,g.name,pt));
   });
-  // « parties jouées » = nombre d'entrées distinctes (une Ryder clôturée = 1 ; ses parties
-  // rattachées ne comptent pas individuellement) → moyenne juste.
-  Object.keys(S).forEach(id=>{ S[id].played=(D[id]||[]).length; });
+  // Compteurs : « played » = toutes les entrées (pour le CUMULÉ). La MOYENNE/partie se calcule
+  // HORS Ryder (event) : un Ryder vaut 8 pts mais ne doit pas gonfler la moyenne. → avgPts/avgPlayed.
+  Object.keys(S).forEach(id=>{ const ds=D[id]||[]; S[id].played=ds.length;
+    const norm=ds.filter(d=>!d.event);
+    S[id].avgPlayed=norm.length;
+    S[id].avgPts=norm.reduce((a,d)=>a+(d.pts||0),0); });
   return {S,H,D};
 }
 
@@ -1845,10 +1849,11 @@ function Championship(){
     for(const g of done){ const p=(g.roster||[]).find(x=>String(x.id)===String(id)); if(p) return p; }
     return {id,name:"?"}; };
   const allIds=[...new Set([...members.map(m=>String(m.id)),...Object.keys(stats.S)])];
-  const rows=allIds.map(id=>{const s=stats.S[id]||{pts:0,played:0,win:0,draw:0,loss:0};
-    return {m:resolve(id),...s,avg:s.played?s.pts/s.played:0};});
+  const rows=allIds.map(id=>{const s=stats.S[id]||{pts:0,played:0,win:0,draw:0,loss:0,avgPlayed:0,avgPts:0};
+    return {m:resolve(id),...s,avg:s.avgPlayed?s.avgPts/s.avgPlayed:0};});
   const byTotal=[...rows].filter(r=>r.played>0).sort((a,b)=>b.pts-a.pts||b.avg-a.avg);
-  const byAvg=[...rows].filter(r=>r.played>0).sort((a,b)=>b.avg-a.avg||b.pts-a.pts);
+  // Moyenne : HORS Ryder (avgPlayed). Un joueur qui n'a fait QUE des Ryders n'a pas de moyenne.
+  const byAvg=[...rows].filter(r=>r.avgPlayed>0).sort((a,b)=>b.avg-a.avg||b.pts-a.pts);
 
   if(!done.length) return <Empty text="Aucune partie terminée. Valide des parties pour alimenter le championnat."/>;
 
@@ -1867,8 +1872,8 @@ function Championship(){
         {" "}(les autres se jouent mais hors classement).</div>
 
       <div style={{display:"flex",gap:10,marginTop:4}}>
-        <RankCol title="🔢 CUMULÉ" rows={byTotal} metric={r=>r.pts} unit="pts"/>
-        <RankCol title="📊 MOYENNE" rows={byAvg} metric={r=>r.avg.toFixed(2)} unit="pts/p."/>
+        <RankCol title="🔢 CUMULÉ" rows={byTotal} metric={r=>r.pts} count={r=>r.played}/>
+        <RankCol title="📊 MOYENNE" rows={byAvg} metric={r=>r.avg.toFixed(2)} count={r=>r.avgPlayed}/>
       </div>
 
       <Section>🔎 Détail des points</Section>
@@ -1899,7 +1904,7 @@ function Championship(){
     </div>
   );
 }
-function RankCol({title,rows,metric,unit}){
+function RankCol({title,rows,metric,count}){
   return (
     <div style={{flex:1,background:T.panel,borderRadius:12,padding:10,
       border:`1px solid ${T.line}`}}>
@@ -1912,7 +1917,7 @@ function RankCol({title,rows,metric,unit}){
           <div style={{flex:1,minWidth:0}}>
             <div style={{fontWeight:800,fontSize:13,whiteSpace:"nowrap",overflow:"hidden",
               textOverflow:"ellipsis"}}>{dispName(r.m)}</div>
-            <div style={{fontSize:9,color:T.dim}}>{r.played}p · {r.win}V {r.draw}N {r.loss}D</div>
+            <div style={{fontSize:9,color:T.dim}}>{(count?count(r):r.played)}p · {r.win}V {r.draw}N {r.loss}D</div>
           </div>
           <span style={{fontFamily:"Anton",fontSize:16,
             color:i===0?T.gold:T.accent}}>{metric(r)}</span>
