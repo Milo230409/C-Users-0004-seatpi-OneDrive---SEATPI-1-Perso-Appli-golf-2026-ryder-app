@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, deleteGameByDataId, dedupeGamesC
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.78 · outils en bas + Ryder démo conteneur"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.79 · classement robuste"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -1839,8 +1839,14 @@ function Championship(){
   const stats=useMemo(()=>computeStandings(done,courses),[done,courses]);
   const [openP,setOpenP]=useState(null);
 
-  const rows=members.map(m=>({m,...(stats.S[m.id]||{pts:0,played:0,win:0,draw:0,loss:0})}))
-    .map(r=>({...r,avg:r.played?r.pts/r.played:0}));
+  // ROBUSTE : on affiche TOUS ceux qui ont marqué — même si leur id ne figure pas dans la liste
+  // des membres (joueur recréé/en double). On retrouve alors leur nom dans les rosters des parties.
+  const resolve=id=>{ const m=members.find(x=>String(x.id)===String(id)); if(m) return m;
+    for(const g of done){ const p=(g.roster||[]).find(x=>String(x.id)===String(id)); if(p) return p; }
+    return {id,name:"?"}; };
+  const allIds=[...new Set([...members.map(m=>String(m.id)),...Object.keys(stats.S)])];
+  const rows=allIds.map(id=>{const s=stats.S[id]||{pts:0,played:0,win:0,draw:0,loss:0};
+    return {m:resolve(id),...s,avg:s.played?s.pts/s.played:0};});
   const byTotal=[...rows].filter(r=>r.played>0).sort((a,b)=>b.pts-a.pts||b.avg-a.avg);
   const byAvg=[...rows].filter(r=>r.played>0).sort((a,b)=>b.avg-a.avg||b.pts-a.pts);
 
