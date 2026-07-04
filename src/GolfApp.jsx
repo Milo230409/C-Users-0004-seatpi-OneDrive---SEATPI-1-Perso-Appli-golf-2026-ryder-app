@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, deleteGameByDataId, dedupeGamesC
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.87 · note + distinctions Ryder"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.88 · chouette + Stableford brut"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -3817,7 +3817,8 @@ function LiveBoard({sg,ps,course,net,result}){
         textAlign:"center",color:T.gold}}>{rV.summary}</div>}
       {rV&&anyScore&&!isTeam&&f!=="matchplay"&&<div style={{marginTop:8,fontSize:12,color:T.dim,
         borderTop:`1px solid ${T.line}`,paddingTop:8}}>
-        ⚡ {rV.summary}</div>}
+        ⚡ Stableford brut : {[...ps].map(p=>({p,s:stablefordBrut(sg,p,course,validated)}))
+          .sort((a,b)=>b.s-a.s).map(x=>`${dispName(x.p)} ${x.s}`).join(" · ")}</div>}
     </div>
   );
 }
