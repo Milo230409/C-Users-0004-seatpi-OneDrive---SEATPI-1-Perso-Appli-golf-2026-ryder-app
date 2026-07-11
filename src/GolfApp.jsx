@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, deleteGameByDataId, dedupeGamesC
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.88 · chouette + Stableford brut"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.89 · net absolu + coups rendus absolus"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -2950,11 +2950,10 @@ function ShareResults({g,courses,playerById}){
       const med=["🥇","🥈","🥉"];
       fiche.forEach((x,i)=>{const m=med[i]||"";
         t+=`👤 ${dispName(x.p)}${m?" "+m:""} · Stab ${x.brut} brut / ${x.net} net\n`;});
-      // coups rendus par joueur (si partie en net)
+      // coups rendus ABSOLUS par joueur (le vrai handicap de jeu, pas le différentiel match play) —
+      // cohérent avec le Stableford net qui utilise aussi les coups rendus absolus.
       if(net && c){
-        const cr=ps.map(p=>{
-          const chp=effChp(p,ps,c,sg.hcpRelative);
-          return `${dispName(p)} ${chp}`;}).join(" · ");
+        const cr=ps.map(p=>`${dispName(p)} ${effChp(p,[p],c,false)}`).join(" · ");
         t+=`🎯 Coups rendus : ${cr}\n`;
       }
       t+=`\n`;
@@ -3654,7 +3653,7 @@ function LiveBoard({sg,ps,course,net,result}){
     const nameA=a.map(dispName).join(" / "),nameB=b.map(dispName).join(" / ");
     // joueurs triés par Stableford brut décroissant (informatif)
     const indiv=ps.map(p=>({p,team:a.includes(p)?0:1,
-      stb:stablefordBrut(sg,p,course,validated)})).sort((x,y)=>y.stb-x.stb);
+      stb:stablefordBrut(sg,p,course,validated),net:stablefordNet(sg,p,course,validated)})).sort((x,y)=>y.stb-x.stb);
     const winA=rV?.winner===nameA, winB=rV?.winner===nameB;
     return (
       <div style={{marginTop:12,background:`linear-gradient(180deg,${T.panel2},${T.panel})`,
@@ -3684,10 +3683,10 @@ function LiveBoard({sg,ps,course,net,result}){
             <div key={i} style={{fontSize:11,color:T.dim,marginBottom:3,lineHeight:1.35}}>
               <b style={{color:T.text}}>Trou {e.h}</b> — {e.notes.join(" · ")}</div>))}
         </div>}
-        {/* STABLEFORD BRUT INDIVIDUEL (secondaire) */}
+        {/* STABLEFORD INDIVIDUEL BRUT / NET (secondaire) */}
         {anyValid && <div style={{borderTop:`1px solid ${T.line}`,paddingTop:8}}>
           <div style={{fontSize:10,color:T.dim,marginBottom:6,textTransform:"uppercase",
-            letterSpacing:.5,fontWeight:700}}>Stableford brut individuel</div>
+            letterSpacing:.5,fontWeight:700}}>Stableford individuel · brut / net</div>
           {indiv.map((r,i)=>(
             <div key={r.p.id} style={{display:"flex",justifyContent:"space-between",
               alignItems:"center",fontSize:12,marginBottom:4}}>
@@ -3695,7 +3694,7 @@ function LiveBoard({sg,ps,course,net,result}){
                 <span style={{display:"inline-block",width:7,height:7,borderRadius:2,
                   background:r.team===0?T.eu:T.us,marginRight:6}}/>
                 {dispName(r.p)}</span>
-              <span style={{fontWeight:800,color:T.text}}>{r.stb} <span style={{fontSize:9,color:T.dim}}>pts</span></span>
+              <span style={{fontWeight:800,color:T.text}}>{r.stb} <span style={{fontSize:9,color:T.dim}}>brut</span> / {r.net} <span style={{fontSize:9,color:T.dim}}>net</span></span>
             </div>))}
         </div>}
       </div>
@@ -3705,7 +3704,7 @@ function LiveBoard({sg,ps,course,net,result}){
   // ===== Affichage spécial MATCH PLAY 1v1 : STATUT en vedette + Stableford brut individuel =====
   if(f==="matchplay" && ps.length===2){
     const nameA=dispName(ps[0]),nameB=dispName(ps[1]);
-    const indiv=ps.map(p=>({p,stb:stablefordBrut(sg,p,course,validated)}));
+    const indiv=ps.map(p=>({p,stb:stablefordBrut(sg,p,course,validated),net:stablefordNet(sg,p,course,validated)}));
     return (
       <div style={{marginTop:12,background:`linear-gradient(180deg,${T.panel2},${T.panel})`,
         borderRadius:12,padding:12,border:`1px solid ${T.line}`}}>
@@ -3724,12 +3723,12 @@ function LiveBoard({sg,ps,course,net,result}){
         {/* Scores individuels = secondaires, en Stableford BRUT (pas le total de coups) */}
         {anyValid && <div style={{borderTop:`1px solid ${T.line}`,paddingTop:8}}>
           <div style={{fontSize:10,color:T.dim,marginBottom:6,textTransform:"uppercase",
-            letterSpacing:.5,fontWeight:700}}>Stableford brut individuel</div>
+            letterSpacing:.5,fontWeight:700}}>Stableford individuel · brut / net</div>
           {indiv.map(r=>(
             <div key={r.p.id} style={{display:"flex",justifyContent:"space-between",
               alignItems:"center",fontSize:12,marginBottom:4}}>
               <span style={{color:T.dim}}>{dispName(r.p)}</span>
-              <span style={{fontWeight:800,color:T.text}}>{r.stb} <span style={{fontSize:9,color:T.dim}}>pts</span></span>
+              <span style={{fontWeight:800,color:T.text}}>{r.stb} <span style={{fontSize:9,color:T.dim}}>brut</span> / {r.net} <span style={{fontSize:9,color:T.dim}}>net</span></span>
             </div>))}
         </div>}
       </div>
