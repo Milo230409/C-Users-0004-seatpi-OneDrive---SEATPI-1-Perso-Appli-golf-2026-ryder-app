@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, deleteGameByDataId, dedupeGamesC
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.91 · parcours Moliets"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.92 · scoring live relatif (écart)"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -3681,7 +3681,15 @@ function LiveBoard({sg,ps,course,net,result}){
                 {t.win&&"🏆 "}{t.n}</div></div>))}
         </div>}
         {anyValid && <div style={{textAlign:"center",fontFamily:"Anton",fontSize:18,
-          color:T.gold,marginBottom:12}}>{rV?.summary}</div>}
+          color:T.gold,marginBottom:12}}>{(()=>{
+            // mexicaine / meilleure-moins-bonne : on montre l'ÉCART (X UP · équipe), pas le "4–2".
+            if(f==="mexicaine"||f==="bestworst"){
+              const cumA=(f==="mexicaine"?rV?.mexA:rV?.teamA)||0, cumB=(f==="mexicaine"?rV?.mexB:rV?.teamB)||0;
+              const lead=Math.abs(cumA-cumB);
+              return lead>0 ? `${lead} UP · ${cumA>cumB?nameA:nameB}` : "Égalité";
+            }
+            return rV?.summary; // autres 2v2 (fourball, foursome…) : déjà en statut match play
+          })()}</div>}
         {/* ⚡ FAITS DE JEU : événements spéciaux qui expliquent le score (mexicaine) */}
         {anyValid && rV?.events?.length>0 && <div style={{borderTop:`1px solid ${T.line}`,
           paddingTop:8,marginBottom:10}}>
@@ -3792,7 +3800,9 @@ function LiveBoard({sg,ps,course,net,result}){
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",
         marginBottom:10}}>
         <span style={{fontFamily:"Anton",fontSize:14,letterSpacing:.5}}>📊 RÉSULTATS LIVE</span>
-        <span style={{fontSize:10,color:T.dim}}>{unit.toUpperCase()} · {validated.length} tr. validés</span></div>
+        <span style={{fontSize:10,color:T.dim}}>{isPoints?"ÉCART":unit.toUpperCase()} · {validated.length} tr. validés</span></div>
+      {isPoints&&anyScore&&<div style={{fontSize:10,color:T.dim,marginBottom:8,marginTop:-4}}>
+        Écart au dernier (ramené à 0) · score complet dans la synthèse ↓</div>}
       {!anyScore && <div style={{fontSize:12,color:T.dim,textAlign:"center",padding:"8px 0"}}>
         Valide des trous (bouton ✓) pour voir le classement s'animer…</div>}
       {rows.map((r,i)=>{
@@ -3807,7 +3817,7 @@ function LiveBoard({sg,ps,course,net,result}){
               <span style={{fontWeight:800,color:isLeader?T.gold:T.text}}>
                 {i+1}. {dispName(r.p)} {isLeader&&"👑"}</span>
               <span style={{fontFamily:"Anton",fontSize:16,
-                color:isLeader?T.gold:T.accent}}>{r.val}{isPoints?<span style={{fontSize:9,color:T.dim}}> pts</span>:""}</span></div>
+                color:isLeader?T.gold:T.accent}}>{isPoints?(r.val-worst):r.val}{isPoints?<span style={{fontSize:9,color:T.dim}}> pts</span>:""}</span></div>
             <div style={{height:8,borderRadius:999,background:T.bg,overflow:"hidden"}}>
               <div style={{width:`${Math.max(12,pct)}%`,height:"100%",borderRadius:999,
                 background:isLeader?`linear-gradient(90deg,${T.gold},#b8860b)`:
