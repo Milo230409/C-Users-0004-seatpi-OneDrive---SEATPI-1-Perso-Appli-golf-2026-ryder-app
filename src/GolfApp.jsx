@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, deleteGameByDataId, dedupeGamesC
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.90 · parcours Seignosse"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.91 · parcours Moliets"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -4357,6 +4357,10 @@ const SEED_COURSES=[
       {name:"Noir",cr:75.59,slope:152,par:73,length:6200},
       {name:"Rouge",cr:71.5,slope:132,par:72,length:4431},
       {name:"Bleu",cr:76.1,slope:144,par:72,length:5142}]},
+  {id:26,name:"Golf de Moliets (La Forêt-L'Océan)",country:"France",par:72,
+    si:[6,1,12,4,15,5,3,14,2,11,10,17,9,7,18,13,16,8],
+    pars:[4,4,5,4,5,3,4,3,4,4,4,3,4,4,5,3,5,4],
+    tees:[{name:"Jaune",cr:71.3,slope:130,par:72}]},
 ];
 
 function Section({children}){return <div style={{fontFamily:"'Archivo',sans-serif",
