@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, deleteGameByDataId, dedupeGamesC
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.89 · net absolu + coups rendus absolus"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.90 · parcours Seignosse"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -425,6 +425,14 @@ export default function App(){
         if(grp.courses?.length===0){
           for(const c of SEED_COURSES){ await upsertEntity("courses",c,null); }
           setCourses(SEED_COURSES);
+        } else {
+          // sinon : on ajoute les NOUVEAUX parcours du seed absents du cloud (ex. Seignosse)
+          const have=new Set((grp.courses||[]).map(c=>String(c.id)));
+          const missing=SEED_COURSES.filter(c=>!have.has(String(c.id)));
+          if(missing.length){
+            for(const c of missing){ await upsertEntity("courses",c,null); }
+            setCourses([...(grp.courses||[]),...missing]);
+          }
         }
       }
       setSyncing(false); setLoaded(true);
@@ -4340,6 +4348,15 @@ const SEED_COURSES=[
     pars:[5,4,3,3,4,4,4,3,4,3,4,3,4,5,4,5,3,4],
     lengths:[477,290,139,165,242,405,279,141,256,146,366,137,285,471,325,443,125,278],length:4970,
     tees:[{name:"Jaune",cr:67.2,slope:129,par:69,length:4970}]},
+  {id:25,name:"Golf de Seignosse",country:"France",par:73,
+    si:[5,13,1,7,17,11,3,15,9,10,6,18,2,12,16,14,8,4],
+    pars:[4,4,4,5,3,4,5,3,4,4,5,3,4,4,4,3,4,6],
+    lengths:[349,275,325,412,112,308,463,106,290,283,482,101,401,316,312,165,321,550],length:5571,
+    tees:[{name:"Jaune",cr:72.46,slope:143,par:73,length:5571},
+      {name:"Blanc",cr:73.78,slope:146,par:73,length:5864},
+      {name:"Noir",cr:75.59,slope:152,par:73,length:6200},
+      {name:"Rouge",cr:71.5,slope:132,par:72,length:4431},
+      {name:"Bleu",cr:76.1,slope:144,par:72,length:5142}]},
 ];
 
 function Section({children}){return <div style={{fontFamily:"'Archivo',sans-serif",
