@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, deleteGameByDataId, dedupeGamesC
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.92 · scoring live relatif (écart)"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.93 · écart chouette/skins, stableford absolu"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -3755,6 +3755,9 @@ function LiveBoard({sg,ps,course,net,result}){
   const pointFormulas=["chouette","onevonevone","stableford","stableford_net","stableford_gross","skins"];
   const isPoints=pointFormulas.includes(f);
   const isTeam=["matchplay","strokeplay_net"].includes(f);
+  // ÉCART « dernier ramené à 0 » : seulement pour les formats « qui mène » (chouette, 1v1v1, skins).
+  // En stroke play et stableford (hors match play) → on affiche les scores ABSOLUS.
+  const relativeRank=["chouette","onevonevone","skins"].includes(f);
 
   // construit les lignes selon le type de formule
   let rows=[];
@@ -3800,8 +3803,8 @@ function LiveBoard({sg,ps,course,net,result}){
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",
         marginBottom:10}}>
         <span style={{fontFamily:"Anton",fontSize:14,letterSpacing:.5}}>📊 RÉSULTATS LIVE</span>
-        <span style={{fontSize:10,color:T.dim}}>{isPoints?"ÉCART":unit.toUpperCase()} · {validated.length} tr. validés</span></div>
-      {isPoints&&anyScore&&<div style={{fontSize:10,color:T.dim,marginBottom:8,marginTop:-4}}>
+        <span style={{fontSize:10,color:T.dim}}>{relativeRank?"ÉCART":unit.toUpperCase()} · {validated.length} tr. validés</span></div>
+      {relativeRank&&anyScore&&<div style={{fontSize:10,color:T.dim,marginBottom:8,marginTop:-4}}>
         Écart au dernier (ramené à 0) · score complet dans la synthèse ↓</div>}
       {!anyScore && <div style={{fontSize:12,color:T.dim,textAlign:"center",padding:"8px 0"}}>
         Valide des trous (bouton ✓) pour voir le classement s'animer…</div>}
@@ -3817,7 +3820,7 @@ function LiveBoard({sg,ps,course,net,result}){
               <span style={{fontWeight:800,color:isLeader?T.gold:T.text}}>
                 {i+1}. {dispName(r.p)} {isLeader&&"👑"}</span>
               <span style={{fontFamily:"Anton",fontSize:16,
-                color:isLeader?T.gold:T.accent}}>{isPoints?(r.val-worst):r.val}{isPoints?<span style={{fontSize:9,color:T.dim}}> pts</span>:""}</span></div>
+                color:isLeader?T.gold:T.accent}}>{relativeRank?(r.val-worst):r.val}{isPoints?<span style={{fontSize:9,color:T.dim}}> pts</span>:""}</span></div>
             <div style={{height:8,borderRadius:999,background:T.bg,overflow:"hidden"}}>
               <div style={{width:`${Math.max(12,pct)}%`,height:"100%",borderRadius:999,
                 background:isLeader?`linear-gradient(90deg,${T.gold},#b8860b)`:
