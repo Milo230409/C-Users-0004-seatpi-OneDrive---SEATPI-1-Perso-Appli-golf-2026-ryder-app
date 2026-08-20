@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, deleteEntityByDataId, deleteGame
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.94 · suppression joueur (admin, cloud)"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.95 · purge invités +2 semaines"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -419,7 +419,17 @@ export default function App(){
       const grp=await loadGroup();
       if(alive&&grp){
         setGames(grp.games||[]);
-        if(grp.players?.length) setMembers(grp.players);
+        if(grp.players?.length){
+          // PURGE : on supprime les INVITÉS de plus de 2 semaines (état + cloud). Les invités sont
+          // les membres non-fondateurs ; leur date de création vient de `created` ou de l'id "g<timestamp>".
+          const TWO_WEEKS=14*24*3600*1000, now=Date.now();
+          const isGuest=m=>!(m.member===true||/^seed-/.test(String(m.id)));
+          const cTime=m=>m.created||(String(m.id)[0]==="g"?parseInt(String(m.id).slice(1),10):null);
+          const stale=grp.players.filter(m=>isGuest(m)&&cTime(m)&&(now-cTime(m)>TWO_WEEKS));
+          const kept=grp.players.filter(m=>!stale.includes(m));
+          setMembers(kept);
+          for(const m of stale){ await deleteEntityByDataId("players",m.id); }
+        }
         if(grp.courses?.length) setCourses(grp.courses);
         // si la base n'a pas encore de parcours, on pousse le seed une 1re fois
         if(grp.courses?.length===0){
@@ -1226,7 +1236,7 @@ function NewGame({setTab}){
     const realName=g=>g.name&&g.name.trim()&&g.name.trim().toLowerCase()!=="invité";
     const keepers=guests.filter(g=>realName(g)&&(parseFloat(g.index)||0)>0)
       .map(g=>({id:g.id,name:g.name.trim(),nick:g.nick?.trim()||"",
-        index:parseFloat(g.index)||0,profileDone:false,guest:false}));
+        index:parseFloat(g.index)||0,profileDone:false,guest:false,created:Date.now()}));
     if(keepers.length){
       const existingIds=new Set(members.map(m=>m.id));
       const toAdd=keepers.filter(k=>!existingIds.has(k.id));
