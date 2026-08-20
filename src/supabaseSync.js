@@ -54,6 +54,15 @@ export async function deleteEntity(table, rowId) {
   await supabase.from(table).delete().eq("id", rowId);
 }
 
+// Supprime TOUTES les lignes d'une entité par son data.id (joueurs, parcours…), doublons inclus.
+// Robuste : sinon l'entité "revient" au resync (le cloud gardait sa ligne).
+export async function deleteEntityByDataId(table, dataId) {
+  if (!supabaseEnabled || dataId == null) return;
+  const { data } = await supabase.from(table).select("id,data");
+  const rows = (data || []).filter(r => String(r.data?.id) === String(dataId));
+  for (const r of rows) { await supabase.from(table).delete().eq("id", r.id); }
+}
+
 // Supprime TOUTES les lignes d'une partie (par data.id) — suppression définitive et fiable,
 // même s'il y a des doublons (sinon la partie « revient » au resync et ses points restent).
 // On récupère les lignes puis on supprime par id (clé primaire) = plus robuste qu'un filtre jsonb.

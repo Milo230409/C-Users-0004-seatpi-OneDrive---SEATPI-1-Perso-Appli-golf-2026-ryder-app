@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef, createContext, useContext } from "react";
 import { supabase, supabaseEnabled } from "./supabaseClient";
-import { loadGroup, upsertEntity, deleteEntity, deleteGameByDataId, dedupeGamesCloud, deleteAllGames, loadMyProfile, saveMyProfile, subscribeGroup } from "./supabaseSync";
+import { loadGroup, upsertEntity, deleteEntity, deleteEntityByDataId, deleteGameByDataId, dedupeGamesCloud, deleteAllGames, loadMyProfile, saveMyProfile, subscribeGroup } from "./supabaseSync";
 
 /* ============================================================
    GOLF CLUB APP v3 — Parties du WE + Événements
@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, deleteGameByDataId, dedupeGamesC
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.93 · écart chouette/skins, stableford absolu"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.94 · suppression joueur (admin, cloud)"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -524,6 +524,11 @@ export default function App(){
   const clearAllGames=async()=>{ setGames([]); if(cloud) await deleteAllGames(); };
   const saveMembers=async(next)=>{ setMembers(next);
     if(cloud){ for(const m of next){ await upsertEntity("players",m,null); } } };
+  // Suppression DÉFINITIVE d'un joueur (admin) : retire du state ET du cloud (sinon il revient au resync).
+  const removeMember=async(m)=>{
+    setMembers(members.filter(x=>String(x.id)!==String(m.id)));
+    if(cloud) await deleteEntityByDataId("players",m.id);
+  };
   const saveCourses=async(next)=>{ setCourses(next);
     if(cloud){ for(const c of next){ await upsertEntity("courses",c,null); } } };
 
@@ -551,7 +556,7 @@ export default function App(){
   const tabs=[["home","Accueil","🏠"],["new","Nouvelle","➕"],
     ["players","Joueurs","👤"],["champ","Classement","🏅"],["history","Historique","📜"]];
   return (
-    <Ctx.Provider value={{user,setUser,members,setMembers:saveMembers,
+    <Ctx.Provider value={{user,setUser,members,setMembers:saveMembers,removeMember,
       games,setGames:saveGames,removeGame,courses,setCourses:saveCourses,
       cloud,syncing,admin:isAdmin(user),cleanupDuplicates,clearAllGames}}>
     <div style={shell}>
@@ -1972,9 +1977,9 @@ function H2HTable({H,members}){
 }
 
 function PlayersTab(){
-  const {members,setMembers,admin}=useContext(Ctx);
+  const {members,setMembers,removeMember,admin}=useContext(Ctx);
   const upd=(id,k,v)=>setMembers(members.map(m=>m.id===id?{...m,[k]:v}:m));
-  const del=id=>setMembers(members.filter(m=>m.id!==id));
+  const del=m=>{ if(confirm(`Supprimer définitivement ${dispName(m)||"ce joueur"} ? (retiré aussi du cloud)`)) removeMember(m); };
   const add=()=>setMembers([...members,{id:Date.now(),name:"",nick:"",index:20}]);
   // Lecture seule pour les non-admins : personne ne modifie la fiche d'un autre.
   if(!admin){
@@ -2009,7 +2014,7 @@ function PlayersTab(){
             <span style={{fontFamily:"Anton",fontSize:18,color:T.gold,minWidth:0,
               flex:"0 0 auto",maxWidth:120,overflow:"hidden",textOverflow:"ellipsis",
               whiteSpace:"nowrap"}}>{dispName(m)}</span>
-            <button onClick={()=>del(m.id)} style={{...delBtn,marginLeft:"auto"}}>✕</button>
+            <button onClick={()=>del(m)} style={{...delBtn,marginLeft:"auto"}}>🗑 Supprimer</button>
           </div>
           <div style={{display:"flex",gap:8}}>
             <Field label="Prénom"><input value={m.name}
