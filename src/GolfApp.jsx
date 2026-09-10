@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, deleteEntityByDataId, deleteGame
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.96 · parcours dans le partage · invité occupe sa place"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.97 · Le Touquet + Bondues (Hawtree, Trent Jones)"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -4392,6 +4392,29 @@ const SEED_COURSES=[
     si:[6,1,12,4,15,5,3,14,2,11,10,17,9,7,18,13,16,8],
     pars:[4,4,5,4,5,3,4,3,4,4,4,3,4,4,5,3,5,4],
     tees:[{name:"Jaune",cr:71.3,slope:130,par:72}]},
+  // ---- Le Touquet : CR + Slope RELEVÉS SUR LA CARTE (Noir/Blanc/Jaune) ----
+  {id:27,name:"Le Touquet Golf Resort — La Mer",country:"France",par:72,
+    si:[8,4,18,14,10,16,12,6,2,17,1,7,3,5,11,9,15,13],
+    pars:[5,3,4,5,4,4,3,4,4,3,4,4,4,4,5,3,5,4],
+    lengths:[445,175,321,428,371,296,134,329,370,128,405,351,334,322,433,153,441,373],length:5809,
+    tees:[{name:"Jaune",cr:71.0,slope:128,par:72,length:5809},
+          {name:"Blanc",cr:73.3,slope:136,par:72,length:6259},
+          {name:"Noir", cr:74.0,slope:139,par:72,length:6430}]},
+  // ---- Bondues : par/SI/longueurs relevés sur la carte, mais la carte NE DONNE PAS le CR
+  //      ni le Slope. Les valeurs ci-dessous sont PROVISOIRES (sources publiques, non
+  //      officielles) → à corriger dans Réglages → Parcours → départs. ----
+  {id:28,name:"Golf de Bondues — Le Hawtree",country:"France",par:73,
+    si:[17,9,11,7,1,13,5,3,15,18,6,16,4,12,10,14,2,8],
+    pars:[5,4,3,5,4,3,4,4,5,3,4,5,4,3,4,4,4,5],
+    lengths:[431,294,152,449,384,136,323,378,439,137,350,417,322,155,302,300,350,446],length:5765,
+    tees:[{name:"Jaune",cr:70.5,slope:131,par:73,length:5765},
+          {name:"Blanc",cr:72.8,slope:131,par:73,length:6201}]},
+  {id:29,name:"Golf de Bondues — Le Trent Jones",country:"France",par:72,
+    si:[5,15,17,9,1,11,7,3,13,6,16,12,4,8,18,14,10,2],
+    pars:[5,3,4,5,4,3,4,4,5,5,3,4,4,3,5,3,4,4],
+    lengths:[444,146,264,418,347,112,362,352,418,453,166,326,309,139,401,139,307,361],length:5464,
+    tees:[{name:"Jaune",cr:71.8,slope:134,par:72,length:5464},
+          {name:"Blanc",cr:73.3,slope:135,par:72,length:5924}]},
 ];
 
 function Section({children}){return <div style={{fontFamily:"'Archivo',sans-serif",
