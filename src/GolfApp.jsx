@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, deleteEntityByDataId, deleteGame
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v4.03 · demande d'adhésion + organisateurs multiples"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v4.04 · organisateur réservé aux membres"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -2118,6 +2118,7 @@ function PlayersTab(){
     setMembers(members.map(x=>String(x.id)===String(m.id)
       ?{...x,memberRequest:undefined,memberRefused:Date.now()}:x)); };
   const toggleAdmin=m=>{ const on=m.admin===true;
+    if(isGuestP(m)) return alert("🔒 Un invité ne peut pas être organisateur. Valide d'abord son adhésion.");
     if(!confirm(on?`Retirer les droits d'organisateur à ${dispName(m)} ?`
       :`Donner les droits d'ORGANISATEUR à ${dispName(m)} ? Il pourra valider les adhésions, modifier les fiches et ouvrir les Réglages.`)) return;
     setMembers(members.map(x=>String(x.id)===String(m.id)?{...x,admin:!on||undefined}:x)); };
@@ -2156,10 +2157,12 @@ function PlayersTab(){
             <span style={{fontFamily:"Anton",fontSize:18,color:T.gold,minWidth:0,
               flex:"0 0 auto",maxWidth:120,overflow:"hidden",textOverflow:"ellipsis",
               whiteSpace:"nowrap"}}>{dispName(m)}</span>
-            <button onClick={()=>toggleAdmin(m)} title="Droits d'organisateur"
+            {/* Le droit d'organisateur ne se donne qu'à un MEMBRE : un invité ne marque
+                même pas de points, il n'a pas à pouvoir supprimer des parties. */}
+            {!isGuestP(m)&&<button onClick={()=>toggleAdmin(m)} title="Droits d'organisateur"
               style={{...delBtn,marginLeft:"auto",borderColor:m.admin?T.gold:T.line,
-                color:m.admin?T.gold:T.dim}}>{m.admin?"⭐ Organisateur":"☆ Organisateur"}</button>
-            <button onClick={()=>del(m)} style={delBtn}>🗑 Supprimer</button>
+                color:m.admin?T.gold:T.dim}}>{m.admin?"⭐ Organisateur":"☆ Organisateur"}</button>}
+            <button onClick={()=>del(m)} style={{...delBtn,marginLeft:isGuestP(m)?"auto":0}}>🗑 Supprimer</button>
           </div>
           {isGuestP(m)&&<div style={{fontSize:11,color:T.dim,marginBottom:4}}>
             🎟️ invité — ne marque pas de points au classement</div>}
