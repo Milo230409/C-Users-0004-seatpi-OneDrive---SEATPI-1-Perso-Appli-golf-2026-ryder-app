@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, deleteEntityByDataId, deleteGame
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.97 · Le Touquet + Bondues (Hawtree, Trent Jones)"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.98 · SSS-Slope officiels Bondues · menu scoring complet"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -53,7 +53,7 @@ const TEE_PRESETS={
   Perso:["Départ 1","Départ 2","Départ 3"],
 };
 const TEE_COLOR={Blanc:"#f4f4f4",Jaune:"#e7c14b",Bleu:"#3a7bd5",Rouge:"#d63a3a",
-  Orange:"#e08a2b",Noir:"#222",Or:"#caa12e",
+  Orange:"#e08a2b",Noir:"#222",Or:"#caa12e",Violet:"#8b5cf6",Vert:"#3aa655",
   Black:"#222",Blue:"#3a7bd5",White:"#f4f4f4",Gold:"#caa12e",
   Red:"#d63a3a",Yellow:"#e7c14b"};
 const teeDot=t=>TEE_COLOR[t]||T.dim;
@@ -908,8 +908,11 @@ function FaqTab(){
       ["👥👥 À 4 joueurs (2 contre 2)","Les FOURBALL comparent la meilleure balle nette de chaque équipe, trou par trou → statut 1 UP / All Square / 2&1. • Fourball (meilleure balle) : chacun sa balle. • Fourball — meilleure & moins bonne : 2 pts/trou (1 pt meilleure balle + 1 pt moins bonne), on cumule. • Foursome / Greensome : une balle, coups alternés. • Scramble : on repart toujours de la meilleure position. • Chamble : chacun sa balle SAUF le drive (toute l'équipe repart du meilleur coup de départ). • Mexicaine (brut) : points cumulés (par+par +5, 2 birdies +10, inversion par birdie adverse), expliqués dans « Faits de jeu »."],
     ]],
     ["🏅 Le classement de saison",[
-      ["🎯 Comment on marque (duels)","Système de DUELS (qui bat qui), identique pour toutes les formules : 1v1 → Victoire 3 · Nul 1 · Défaite 0. À 3 → 2 duels (battre les 2 = 4). Double 2v2 → V 3 par équipier. Indépendant de la formule."],
-      ["⚖️ Qui compte ?","Une confrontation rapporte des points seulement s'il y a AU MOINS 2 membres G&A dedans. ⚠️ Les INVITÉS ne marquent JAMAIS (ni en partie, ni à la Ryder)."],
+      ["🎯 Comment on marque (duels)","Tes points = la SOMME DE TES DUELS (qui bat qui). Le même système pour TOUTES les formules : la formule décide qui gagne, les duels décident combien ça rapporte. Un duel se tranche au total net (puis, à égalité, au nombre de birdies nets)."],
+      ["🔢 Le barème exact","👥 2 joueurs — victoire 3 · nul 1 · défaite 0.\n👥 3 joueurs (chouette, 1v1v1…) — un duel gagné vaut 2, et il y a 2 duels à gagner : 1er 4 · 2e 2 · 3e 0.\n👥 4 joueurs en individuel (stableford, skins, stroke) — un duel gagné vaut 1, il y en a 3 : 1er 3 · 2e 2 · 3e 1 · 4e 0.\n👥👥 2 contre 2 — victoire COLLECTIVE : 3 points à CHAQUE équipier · nul 1 · défaite 0.\nPourquoi ces chiffres : battre 2 personnes (4 pts) doit rapporter plus qu'en battre une seule (3 pts) — c'est plus dur."],
+      ["⚖️ Qui compte ?","Une confrontation ne rapporte des points que s'il y a AU MOINS 2 membres G&A dedans. Sinon elle se joue normalement, mais elle est ignorée au classement. Une partie non terminée (18 trous non remplis) = 0 point. Une partie de 🧪 TEST ne compte jamais."],
+      ["🎟️ Les invités","⚠️ Un invité ne marque JAMAIS de point (ni en partie, ni à la Ryder). MAIS il OCCUPE SA PLACE : il joue vraiment le classement de la partie et influence donc les points que prennent les membres.\nExemple, chouette à 3 avec un invité : s'il GAGNE, il ne marque rien, et le membre arrivé 2e prend les 2 points du 2e — pas les 4 du vainqueur. S'il finit dernier, rien ne change pour les membres.\nEt dans le face-à-face (tes confrontations directes), seuls les duels MEMBRE contre MEMBRE sont enregistrés."],
+      ["🎯 Les coups rendus (brut / net / différentiel)","Coups rendus = index × (Slope ÷ 113) + (SSS − Par), arrondi. Ils sont distribués sur les trous du plus dur au plus facile, selon l'INDEX DE DIFFICULTÉ de la carte (le SI, de 1 à 18) — au-delà de 18, on repart au trou n°1 pour un 2e coup.\n• BRUT : on compare les coups réels, sans rien retrancher.\n• NET : net = brut − coups rendus. Chacun reçoit son total complet.\n• DIFFÉRENTIEL (à cocher en match play) : on retranche le plus bas du groupe. Le meilleur joue à 0 et les autres reçoivent seulement l'ÉCART.\nD'où l'importance d'un index fidèle et d'un parcours bien renseigné (par, SI, SSS, Slope)."],
       ["📊 Cumulé vs Moyenne","Deux classements : CUMULÉ (le total — plus tu joues/gagnes, plus tu montes) et MOYENNE par partie (pour comparer ceux qui jouent beaucoup et ceux qui jouent peu). À savoir : le bonus trophée d'une Ryder (le +5) compte au CUMULÉ mais PAS dans la moyenne — une Ryder y vaut 3 pour un gagnant, comme une victoire normale."],
       ["🔎 Détail des points","Tape un joueur dans le classement (« 🔎 Détail des points ») pour voir, partie par partie, d'où viennent ses points. Tu y trouves aussi tes confrontations directes."],
       ["🏆 Ryder gagnées","Chaque compte affiche son total de Ryder gagnées. Les vainqueurs de la DERNIÈRE Ryder sont mis en avant en haut de l'écran d'accueil, surlignés en or avec une coupe 🏆."],
@@ -920,7 +923,7 @@ function FaqTab(){
       ["📜 Voir toutes les parties","Historique → « 🌍 Toutes » : tout le monde voit et peut OUVRIR toutes les parties — terminées, en cours ou à venir. Les Ryder ressortent en doré. Supprimer une partie retire automatiquement ses points du classement."],
     ]],
     ["📲 Partage & droits",[
-      ["💬 Partage WhatsApp","À la fin d'une partie : le résultat + une fiche par joueur (Stableford brut & net) + l'évolution au classement, prêt à partager au groupe en un clic. Si la partie ne compte pas (moins de 2 membres), c'est précisé."],
+      ["💬 Partage WhatsApp","À la fin d'une partie : le PARCOURS joué, le résultat, une fiche par joueur (Stableford brut & net), les coups rendus de chacun et l'évolution au classement — prêt à partager au groupe en un clic. Si la partie ne compte pas (moins de 2 membres), c'est précisé."],
       ["🔒 L'organisateur","Le menu ⚙️ (réglages) et la suppression de parcours sont réservés à l'organisateur, qui peut aussi modifier la fiche d'un autre joueur. Les autres : ils créent/corrigent des parcours et gèrent LEUR fiche."],
     ]],
   ];
@@ -946,7 +949,8 @@ function FaqTab(){
             {isOpen && items.map(([t,d],i)=>(
               <div key={i} style={{...card(T.line),marginBottom:6,marginLeft:6}}>
                 <div style={{fontWeight:800,marginBottom:4,fontSize:14}}>{t}</div>
-                <div style={{fontSize:13,color:T.dim,lineHeight:1.5}}>{d}</div>
+                <div style={{fontSize:13,color:T.dim,lineHeight:1.5,
+                  whiteSpace:"pre-line"}}>{d}</div>
               </div>))}
           </div>
         );
@@ -4400,21 +4404,30 @@ const SEED_COURSES=[
     tees:[{name:"Jaune",cr:71.0,slope:128,par:72,length:5809},
           {name:"Blanc",cr:73.3,slope:136,par:72,length:6259},
           {name:"Noir", cr:74.0,slope:139,par:72,length:6430}]},
-  // ---- Bondues : par/SI/longueurs relevés sur la carte, mais la carte NE DONNE PAS le CR
-  //      ni le Slope. Les valeurs ci-dessous sont PROVISOIRES (sources publiques, non
-  //      officielles) → à corriger dans Réglages → Parcours → départs. ----
+  // ---- Bondues : par/index/longueurs relevés sur la carte de score ; SSS et Slope
+  //      MESSIEURS repris de la table officielle du club (calculette FFGolf). ----
   {id:28,name:"Golf de Bondues — Le Hawtree",country:"France",par:73,
     si:[17,9,11,7,1,13,5,3,15,18,6,16,4,12,10,14,2,8],
     pars:[5,4,3,5,4,3,4,4,5,3,4,5,4,3,4,4,4,5],
     lengths:[431,294,152,449,384,136,323,378,439,137,350,417,322,155,302,300,350,446],length:5765,
-    tees:[{name:"Jaune",cr:70.5,slope:131,par:73,length:5765},
-          {name:"Blanc",cr:72.8,slope:131,par:73,length:6201}]},
+    tees:[{name:"Jaune", cr:71.3,slope:127,par:73,length:5761},
+          {name:"Blanc", cr:73.2,slope:133,par:73,length:6151},
+          {name:"Noir",  cr:73.4,slope:134,par:73,length:6203},
+          {name:"Bleu",  cr:69.4,slope:123,par:73,length:5321},
+          {name:"Rouge", cr:67.2,slope:118,par:73,length:4941},
+          {name:"Violet",cr:63.0,slope:115,par:73,length:4170},
+          {name:"Orange",cr:54.0,slope:113,par:72,length:2607}]},
   {id:29,name:"Golf de Bondues — Le Trent Jones",country:"France",par:72,
     si:[5,15,17,9,1,11,7,3,13,6,16,12,4,8,18,14,10,2],
     pars:[5,3,4,5,4,3,4,4,5,5,3,4,4,3,5,3,4,4],
     lengths:[444,146,264,418,347,112,362,352,418,453,166,326,309,139,401,139,307,361],length:5464,
-    tees:[{name:"Jaune",cr:71.8,slope:134,par:72,length:5464},
-          {name:"Blanc",cr:73.3,slope:135,par:72,length:5924}]},
+    tees:[{name:"Jaune", cr:68.9,slope:121,par:72,length:5464},
+          {name:"Blanc", cr:71.4,slope:129,par:72,length:5924},
+          {name:"Noir",  cr:71.8,slope:134,par:72,length:6006},
+          {name:"Bleu",  cr:66.8,slope:117,par:72,length:5037},
+          {name:"Rouge", cr:64.2,slope:112,par:72,length:4520},
+          {name:"Violet",cr:62.6,slope:109,par:72,length:4231},
+          {name:"Orange",cr:54.0,slope:113,par:72,length:2565}]},
 ];
 
 function Section({children}){return <div style={{fontFamily:"'Archivo',sans-serif",
