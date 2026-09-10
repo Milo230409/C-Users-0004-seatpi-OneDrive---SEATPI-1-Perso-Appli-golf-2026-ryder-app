@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, deleteEntityByDataId, deleteGame
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v4.01 · départs officiels · Seignosse corrigé"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v4.02 · Seignosse par 73 (par 6 au 18)"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -4421,10 +4421,11 @@ const SEED_COURSES=[
     si:[5,13,1,7,17,11,3,15,9,10,6,18,2,12,16,14,8,4],
     pars:[4,4,4,5,3,4,5,3,4,4,5,3,4,4,4,3,4,6],
     lengths:[349,275,325,412,112,308,463,106,290,283,482,101,401,316,312,165,321,550],length:5571,
-    tees:[{name:"Jaune",cr:72.5,slope:143,par:72,length:5538},
-          {name:"Blanc",cr:73.8,slope:146,par:72,length:5779},
-          {name:"Bleu", cr:70.3,slope:139,par:72,length:5091},
-          {name:"Rouge",cr:66.5,slope:131,par:72,length:4331}]},
+    // par 73 : le 18 est un PAR 6 (la table FFGolf le compte en par 5, d'ou son par 72).
+    tees:[{name:"Jaune",cr:72.5,slope:143,par:73,length:5538},
+          {name:"Blanc",cr:73.8,slope:146,par:73,length:5779},
+          {name:"Bleu", cr:70.3,slope:139,par:73,length:5091},
+          {name:"Rouge",cr:66.5,slope:131,par:73,length:4331}]},
   {id:26,name:"Golf de Moliets (La Forêt-L'Océan)",country:"France",par:72,
     si:[6,1,12,4,15,5,3,14,2,11,10,17,9,7,18,13,16,8],
     pars:[4,4,5,4,5,3,4,3,4,4,4,3,4,4,5,3,5,4],
@@ -4441,10 +4442,11 @@ const SEED_COURSES=[
     si:[8,4,18,14,10,16,12,6,2,17,1,7,3,5,11,9,15,13],
     pars:[5,3,4,5,4,4,3,4,4,3,4,4,4,4,5,3,5,4],
     lengths:[445,175,321,428,371,296,134,329,370,128,405,351,334,322,433,153,441,373],length:5809,
-    tees:[{name:"Jaune",cr:70.6,slope:127,par:71,length:5717},
-          {name:"Blanc",cr:72.8,slope:134,par:71,length:6166},
-          {name:"Bleu", cr:68.3,slope:123,par:71,length:5267},
-          {name:"Rouge",cr:66.0,slope:119,par:71,length:4810}]},
+    // par 72 comme la carte de score (la table FFGolf annonce 71 — a confirmer au club).
+    tees:[{name:"Jaune",cr:70.6,slope:127,par:72,length:5717},
+          {name:"Blanc",cr:72.8,slope:134,par:72,length:6166},
+          {name:"Bleu", cr:68.3,slope:123,par:72,length:5267},
+          {name:"Rouge",cr:66.0,slope:119,par:72,length:4810}]},
   // ---- Bondues : par/index/longueurs relevés sur la carte de score ; SSS et Slope
   //      MESSIEURS repris de la table officielle du club (calculette FFGolf). ----
   {id:28,name:"Golf de Bondues — Le Hawtree",country:"France",par:73,
