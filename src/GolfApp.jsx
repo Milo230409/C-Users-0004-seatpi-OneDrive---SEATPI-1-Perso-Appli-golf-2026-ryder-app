@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, deleteEntityByDataId, deleteGame
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v4.00 · départs officiels · blanc-jaune-bleu-rouge uniquement"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v4.01 · départs officiels · Seignosse corrigé"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -4325,7 +4325,8 @@ const SEED_COURSES=[
     si:[9,5,17,13,7,15,11,1,3,16,14,8,10,4,18,6,2,12],
     pars:[4,4,3,4,4,3,4,5,4,4,3,5,4,4,3,4,4,5],
     lengths:[351,345,143,323,354,159,361,531,348,319,146,483,358,367,141,364,390,484],length:5967,
-    tees:[{name:"Jaune",cr:72.1,slope:135,par:71,length:5967}]},
+    tees:[{name:"Jaune",cr:72.1,slope:135,par:71,length:5971},
+          {name:"Blanc",cr:74.2,slope:139,par:71,length:6304}]},
   {id:9,name:"Torremirona Golf Club",country:"Espagne",par:72,
     si:[18,14,2,12,6,8,10,4,16,17,9,15,13,5,7,1,3,11],
     pars:[4,3,4,5,3,5,4,4,4,3,4,4,5,4,3,4,4,5],
@@ -4412,26 +4413,38 @@ const SEED_COURSES=[
     si:[9,16,8,7,17,1,18,6,15,2,3,14,5,10,4,12,11,13],
     pars:[5,4,3,3,4,4,4,3,4,3,4,3,4,5,4,5,3,4],
     lengths:[477,290,139,165,242,405,279,141,256,146,366,137,285,471,325,443,125,278],length:4970,
-    tees:[{name:"Jaune",cr:67.2,slope:129,par:69,length:4970}]},
+    tees:[{name:"Jaune",cr:67.2,slope:129,par:69,length:4970},
+          {name:"Blanc",cr:67.7,slope:130,par:69,length:5054},
+          {name:"Bleu", cr:65.0,slope:125,par:69,length:4521},
+          {name:"Rouge",cr:62.9,slope:121,par:69,length:4120}]},
   {id:25,name:"Golf de Seignosse",country:"France",par:73,
     si:[5,13,1,7,17,11,3,15,9,10,6,18,2,12,16,14,8,4],
     pars:[4,4,4,5,3,4,5,3,4,4,5,3,4,4,4,3,4,6],
     lengths:[349,275,325,412,112,308,463,106,290,283,482,101,401,316,312,165,321,550],length:5571,
-    tees:[{name:"Jaune",cr:72.46,slope:143,par:73,length:5571},
-          {name:"Blanc",cr:73.78,slope:146,par:73,length:5864},
-          {name:"Bleu",cr:76.1,slope:144,par:72,length:5142},
-          {name:"Rouge",cr:71.5,slope:132,par:72,length:4431}]},
+    tees:[{name:"Jaune",cr:72.5,slope:143,par:72,length:5538},
+          {name:"Blanc",cr:73.8,slope:146,par:72,length:5779},
+          {name:"Bleu", cr:70.3,slope:139,par:72,length:5091},
+          {name:"Rouge",cr:66.5,slope:131,par:72,length:4331}]},
   {id:26,name:"Golf de Moliets (La Forêt-L'Océan)",country:"France",par:72,
     si:[6,1,12,4,15,5,3,14,2,11,10,17,9,7,18,13,16,8],
     pars:[4,4,5,4,5,3,4,3,4,4,4,3,4,4,5,3,5,4],
-    tees:[{name:"Jaune",cr:71.3,slope:130,par:72}]},
-  // ---- Le Touquet : CR + Slope RELEVÉS SUR LA CARTE (Noir/Blanc/Jaune) ----
+    tees:[{name:"Jaune",cr:71.3,slope:130,par:72,length:5454},
+          {name:"Blanc",cr:73.2,slope:141,par:72,length:5907},
+          {name:"Bleu", cr:69.4,slope:127,par:72,length:5079},
+          {name:"Rouge",cr:67.3,slope:122,par:72,length:4651}]},
+  // ---- Le Touquet : SSS/Slope de la table officielle (par 71). ⚠️ La carte de
+  //      score papier annonce par 72 et 5809 m au jaune, la table officielle
+  //      par 71 et 5717 m : la carte est probablement une ancienne edition. Les
+  //      pars/index/longueurs par trou ci-dessous viennent encore de la carte —
+  //      a reprendre sur une carte a jour. Idem Seignosse (par 73 vs 72). ----
   {id:27,name:"Le Touquet Golf Resort — La Mer",country:"France",par:72,
     si:[8,4,18,14,10,16,12,6,2,17,1,7,3,5,11,9,15,13],
     pars:[5,3,4,5,4,4,3,4,4,3,4,4,4,4,5,3,5,4],
     lengths:[445,175,321,428,371,296,134,329,370,128,405,351,334,322,433,153,441,373],length:5809,
-    tees:[{name:"Jaune",cr:71.0,slope:128,par:72,length:5809},
-          {name:"Blanc",cr:73.3,slope:136,par:72,length:6259}]},
+    tees:[{name:"Jaune",cr:70.6,slope:127,par:71,length:5717},
+          {name:"Blanc",cr:72.8,slope:134,par:71,length:6166},
+          {name:"Bleu", cr:68.3,slope:123,par:71,length:5267},
+          {name:"Rouge",cr:66.0,slope:119,par:71,length:4810}]},
   // ---- Bondues : par/index/longueurs relevés sur la carte de score ; SSS et Slope
   //      MESSIEURS repris de la table officielle du club (calculette FFGolf). ----
   {id:28,name:"Golf de Bondues — Le Hawtree",country:"France",par:73,
