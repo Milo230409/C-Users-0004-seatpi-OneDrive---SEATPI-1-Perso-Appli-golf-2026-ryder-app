@@ -11,7 +11,7 @@ import { loadGroup, upsertEntity, deleteEntity, deleteEntityByDataId, deleteGame
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v3.95 · purge invités +2 semaines"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v3.96 · parcours dans le partage · invité occupe sa place"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
@@ -1758,12 +1758,11 @@ function computeStandings(done, courses){
     subs.forEach(({sg,course})=>{
       const psAll=sg.players.map(id=>g.roster.find(p=>p.id===id)).filter(Boolean);
       if(!counts(psAll)) return; // pas assez de membres → ne compte pas au classement
-      const isTeam=TEAM_2V2.includes(sg.formula);
-      // Équipe (2v2) : on calcule sur l'équipe COMPLÈTE (invité compris pour déterminer qui
-      // gagne), puis on n'attribue les points QU'AUX MEMBRES. Non-équipe : seuls les duels
-      // MEMBRE contre MEMBRE comptent (les invités sont retirés du calcul).
-      const scoring = isTeam ? psAll : psAll.filter(isMember);
-      const {pts,h2h,res}=playerScores(sg,scoring,course,net);
+      // On calcule TOUJOURS sur le plateau COMPLET, invités compris : un invité OCCUPE SA
+      // PLACE et influence donc les points pris par les membres, mais il n'en marque jamais
+      // lui-même (filtre isMember juste en dessous). Ex. chouette à 3 : si l'invité gagne,
+      // le membre 2e prend les 2 pts du 2e, pas les 4 pts du vainqueur.
+      const {pts,h2h,res}=playerScores(sg,psAll,course,net);
       Object.entries(pts).forEach(([id,pt])=>{
         const pl=psAll.find(p=>String(p.id)===String(id));
         if(!isMember(pl)) return; // les INVITÉS ne marquent jamais
@@ -1771,6 +1770,8 @@ function computeStandings(done, courses){
         const r=res?.[id];
         if(r==='W')s.win++;else if(r==='D')s.draw++;else s.loss++;});
       h2h.forEach(({a,b,res})=>{
+        const byId=id=>psAll.find(p=>String(p.id)===String(id));
+        if(!isMember(byId(a))||!isMember(byId(b))) return; // duels MEMBRE contre MEMBRE seuls
         const key=a<b?`${a}|${b}`:`${b}|${a}`;
         if(!H[key])H[key]={a:0,b:0,nul:0};
         const flip=!(a<b);
@@ -2952,7 +2953,9 @@ function ShareResults({g,courses,playerById}){
       :isTournament?"🏅 Tournoi"
       :"⛳ Partie amicale";
     const D="—————————————";
-    let t=`${kind}\n${g.name}\n${net?"Net":"Brut"}\n${D}\n`;
+    // Parcours en en-tête : sur un tournoi/Ryder chaque manche affiche déjà le sien.
+    const mainCourse=isTournament?null:courses.find(x=>x.id===g.courseId);
+    let t=`${kind}\n${g.name}\n${mainCourse?`⛳ ${mainCourse.name}\n`:""}${net?"Net":"Brut"}\n${D}\n`;
     const subs=g.rounds
       ? g.rounds.flatMap(r=>r.subgames.map(sg=>({sg,c:courses.find(x=>x.id===r.courseId),rid:r.id})))
       : g.subgames.map(sg=>({sg,c:courses.find(x=>x.id===g.courseId)}));
