@@ -11,19 +11,52 @@ import { loadGroup, upsertEntity, deleteEntity, deleteEntityByDataId, deleteGame
      par défaut, renommables.
    ============================================================ */
 
-const APP_VERSION="v4.02 · Seignosse par 73 (par 6 au 18)"; // ← change à chaque mise en prod pour vérifier
+const APP_VERSION="v4.03 · demande d'adhésion + organisateurs multiples"; // ← change à chaque mise en prod pour vérifier
 // Valeurs par défaut EN DUR (toujours présentes, même sur un nouveau téléphone / cache vidé).
 // Modifiables dans Réglages ; ce qui y est saisi remplace ces valeurs.
 const DEFAULT_API_KEY="HZG53L3HRXILJV56FO5NENQQGU";
 const DEFAULT_WA="https://chat.whatsapp.com/JRErxQfHbNkJ4xFutnjklk";
 // Déconnexion auto après cette durée d'INACTIVITÉ (sauf si en partie en cours).
 const SESSION_TIMEOUT=2*60*60*1000; // 2 heures
-// Qui peut ouvrir le menu Réglages (clé API, lien WhatsApp…). Insensible à la casse.
-// Ajoute ici les prénoms/surnoms autorisés.
+// ORGANISATEUR : le droit se porte sur la FICHE du joueur (drapeau `admin`), et s'accorde
+// ou se retire depuis l'onglet Joueurs. Il n'y a pas de délégation temporaire : un
+// organisateur l'est en permanence, jusqu'à ce qu'on lui retire.
+// ADMIN_KEYS n'est qu'un FILET DE SECOURS : si aucune fiche ne porte encore le drapeau
+// (1re mise en service, cache vidé, cloud injoignable), le fondateur reste reconnu par son
+// prénom — sinon plus personne ne pourrait donner les droits à qui que ce soit.
 const ADMIN_KEYS=["philippe","phil"];
 function isAdmin(u){ if(!u) return false;
+  if(u.admin===true) return true;
   const a=(u.name||"").trim().toLowerCase(), b=(u.nick||"").trim().toLowerCase();
   return ADMIN_KEYS.includes(a)||ADMIN_KEYS.includes(b); }
+// Fiche complète pour DEVENIR MEMBRE : prénom, surnom (affiché partout), index et mobile.
+// L'email reste facultatif. Renvoie la liste de ce qui manque (vide = fiche complète).
+function missingForMember(p){
+  const m=[];
+  if(!String(p?.name||"").trim()) m.push("le prénom");
+  if(!String(p?.nick||"").trim()) m.push("le surnom");
+  if(p?.index==null||p.index===""||!(parseFloat(p.index)>0)) m.push("l'index");
+  if(!String(p?.mobile||"").trim()) m.push("le mobile");
+  return m;
+}
+const isGuestP=m=>!(m?.member===true||/^seed-/.test(String(m?.id)));
+// MÉNAGE : les INVITÉS qui n'ont pas joué depuis UN MOIS sont supprimés (fiche + cloud).
+// « Joué » = figurer au roster d'une partie ; celui qui n'a jamais joué est jugé sur sa
+// date d'arrivée. Un invité dont la DEMANDE D'ADHÉSION est en attente n'est JAMAIS
+// supprimé, sinon sa demande disparaîtrait avant que l'organisateur l'ait vue. Les
+// MEMBRES ne sont jamais purgés.
+const ONE_MONTH=30*24*3600*1000;
+function stalePlayers(players,games,now=Date.now()){
+  const cTime=m=>m.created||(String(m.id)[0]==="g"?parseInt(String(m.id).slice(1),10):null);
+  const gTime=g=>g.created||(typeof g.id==="number"?g.id:null);
+  const lastPlayed={};
+  (games||[]).forEach(g=>{const t=gTime(g); if(!t) return;
+    (g.roster||[]).forEach(pl=>{const k=String(pl.id);
+      if(!lastPlayed[k]||t>lastPlayed[k]) lastPlayed[k]=t;});});
+  const seen=m=>lastPlayed[String(m.id)]||cTime(m);
+  return (players||[]).filter(m=>isGuestP(m)&&!m.memberRequest
+    &&seen(m)&&(now-seen(m)>ONE_MONTH));
+}
 const T={
   bg:"#0a0f0c",        // fond quasi noir légèrement verdâtre
   panel:"#121a15",     // carte
@@ -420,12 +453,7 @@ export default function App(){
       if(alive&&grp){
         setGames(grp.games||[]);
         if(grp.players?.length){
-          // PURGE : on supprime les INVITÉS de plus de 2 semaines (état + cloud). Les invités sont
-          // les membres non-fondateurs ; leur date de création vient de `created` ou de l'id "g<timestamp>".
-          const TWO_WEEKS=14*24*3600*1000, now=Date.now();
-          const isGuest=m=>!(m.member===true||/^seed-/.test(String(m.id)));
-          const cTime=m=>m.created||(String(m.id)[0]==="g"?parseInt(String(m.id).slice(1),10):null);
-          const stale=grp.players.filter(m=>isGuest(m)&&cTime(m)&&(now-cTime(m)>TWO_WEEKS));
+          const stale=stalePlayers(grp.players,grp.games||[]);
           const kept=grp.players.filter(m=>!stale.includes(m));
           setMembers(kept);
           for(const m of stale){ await deleteEntityByDataId("players",m.id); }
@@ -876,6 +904,60 @@ function AccountTab(){
       {err&&<div style={{color:T.gold,fontSize:12,marginTop:8}}>{err}</div>}
       <button onClick={save} style={{...addBtn,background:saved?T.gold:T.accent,
         color:saved?"#1a1200":"#04150b"}}>{saved?"✅ Enregistré":"Enregistrer mes infos"}</button>
+      <JoinClub me={me} draft={{name,nick,index,mobile,email,comm}}/>
+    </div>
+  );
+}
+
+// DEVENIR MEMBRE : visible uniquement pour les INVITÉS. La demande n'est possible que si la
+// fiche est complète (prénom, surnom, index, mobile — l'email reste facultatif) ; on
+// enregistre la fiche en même temps que la demande, pour que l'organisateur la voie remplie.
+function JoinClub({me,draft}){
+  const {user,setUser,members,setMembers}=useContext(Ctx);
+  const [sent,setSent]=useState(false);
+  if(!isGuestP(me)) return null;                       // déjà membre → rien à demander
+  const candidat={...me,...draft,index:parseFloat(draft.index)||0};
+  const manque=missingForMember(candidat);
+  const enAttente=!!me.memberRequest;
+  const refuse=!!me.memberRefused&&!enAttente;
+  const demander=()=>{
+    const updated={...candidat,name:draft.name.trim(),nick:draft.nick.trim(),
+      mobile:draft.mobile.trim(),email:draft.email.trim(),profileDone:true,
+      memberRequest:Date.now(),memberRefused:undefined};
+    const exists=members.some(m=>String(m.id)===String(updated.id));
+    setMembers(exists?members.map(m=>String(m.id)===String(updated.id)?updated:m):[...members,updated]);
+    setUser({...user,...updated});
+    setSent(true);
+  };
+  return (
+    <div style={{...card(T.gold),marginTop:14}}>
+      <div style={{fontWeight:800,marginBottom:4}}>🎟️ Devenir membre du club</div>
+      {enAttente||sent ? (
+        <div style={{fontSize:12,color:T.dim,lineHeight:1.5}}>
+          ⏳ <b style={{color:T.text}}>Demande envoyée.</b> L'organisateur la validera depuis
+          l'onglet 👤 Joueurs. En attendant tu continues à jouer normalement — simplement,
+          tes points ne comptent pas encore au classement.</div>
+      ) : (
+        <>
+          <div style={{fontSize:12,color:T.dim,lineHeight:1.5,marginBottom:10}}>
+            {refuse&&<><b style={{color:T.gold}}>Ta demande précédente n'a pas été retenue.</b>
+              {" "}Tu peux en refaire une.<br/></>}
+            Tu joues aujourd'hui en <b style={{color:T.text}}>invité</b> : tu marques les scores
+            comme tout le monde, mais tu ne prends pas de points au classement. Demande à
+            rejoindre le club — l'organisateur valide, et tu comptes dès ta partie suivante.
+            {" "}<b style={{color:T.text}}>Tes parties passées restent des parties d'invité</b>,
+            tu démarres à zéro.</div>
+          {manque.length>0 && (
+            <div style={{fontSize:12,color:T.gold,marginBottom:10}}>
+              Il manque {manque.join(", ")} dans ta fiche ci-dessus.</div>)}
+          <button onClick={demander} disabled={manque.length>0}
+            style={{...addBtn,margin:0,opacity:manque.length?0.45:1,
+              cursor:manque.length?"not-allowed":"pointer",
+              background:manque.length?T.panel2:T.accent,
+              color:manque.length?T.dim:"#04150b"}}>
+            Demander à devenir membre</button>
+        </>
+      )}
     </div>
   );
 }
@@ -911,6 +993,8 @@ function FaqTab(){
       ["🎯 Comment on marque (duels)","Tes points = la SOMME DE TES DUELS (qui bat qui). Le même système pour TOUTES les formules : la formule décide qui gagne, les duels décident combien ça rapporte. Un duel se tranche au total net (puis, à égalité, au nombre de birdies nets)."],
       ["🔢 Le barème exact","👥 2 joueurs — victoire 3 · nul 1 · défaite 0.\n👥 3 joueurs (chouette, 1v1v1…) — un duel gagné vaut 2, et il y a 2 duels à gagner : 1er 4 · 2e 2 · 3e 0.\n👥 4 joueurs en individuel (stableford, skins, stroke) — un duel gagné vaut 1, il y en a 3 : 1er 3 · 2e 2 · 3e 1 · 4e 0.\n👥👥 2 contre 2 — victoire COLLECTIVE : 3 points à CHAQUE équipier · nul 1 · défaite 0.\nPourquoi ces chiffres : battre 2 personnes (4 pts) doit rapporter plus qu'en battre une seule (3 pts) — c'est plus dur."],
       ["⚖️ Qui compte ?","Une confrontation ne rapporte des points que s'il y a AU MOINS 2 membres G&A dedans. Sinon elle se joue normalement, mais elle est ignorée au classement. Une partie non terminée (18 trous non remplis) = 0 point. Une partie de 🧪 TEST ne compte jamais."],
+      ["🙋 Devenir membre","Un invité peut demander à rejoindre le club : 👤 Mon compte → « Devenir membre ». Il faut d'abord une fiche complète — prénom, SURNOM (il s'affiche partout), index et mobile ; l'email reste facultatif. L'organisateur voit la demande dans 👤 Joueurs et l'accepte ou la refuse.\n⚠️ L'adhésion n'est PAS rétroactive : les parties déjà jouées restent des parties d'invité, le nouveau membre démarre à zéro et compte à partir de sa partie suivante. Un refus n'empêche pas de redemander plus tard."],
+      ["🧹 Ménage automatique","Un invité qui n'a pas joué depuis UN MOIS est supprimé automatiquement (fiche et cloud). Exception : tant qu'une demande d'adhésion est en attente, il n'est jamais supprimé. Les membres, eux, ne sont jamais purgés."],
       ["🎟️ Les invités","⚠️ Un invité ne marque JAMAIS de point (ni en partie, ni à la Ryder). MAIS il OCCUPE SA PLACE : il joue vraiment le classement de la partie et influence donc les points que prennent les membres.\nExemple, chouette à 3 avec un invité : s'il GAGNE, il ne marque rien, et le membre arrivé 2e prend les 2 points du 2e — pas les 4 du vainqueur. S'il finit dernier, rien ne change pour les membres.\nEt dans le face-à-face (tes confrontations directes), seuls les duels MEMBRE contre MEMBRE sont enregistrés."],
       ["🎯 Les coups rendus (brut / net / différentiel)","Coups rendus = index × (Slope ÷ 113) + (SSS − Par), arrondi. Ils sont distribués sur les trous du plus dur au plus facile, selon l'INDEX DE DIFFICULTÉ de la carte (le SI, de 1 à 18) — au-delà de 18, on repart au trou n°1 pour un 2e coup.\n• BRUT : on compare les coups réels, sans rien retrancher.\n• NET : net = brut − coups rendus. Chacun reçoit son total complet.\n• DIFFÉRENTIEL (à cocher en match play) : on retranche le plus bas du groupe. Le meilleur joue à 0 et les autres reçoivent seulement l'ÉCART.\nD'où l'importance d'un index fidèle et d'un parcours bien renseigné (par, SI, SSS, Slope)."],
       ["📊 Cumulé vs Moyenne","Deux classements : CUMULÉ (le total — plus tu joues/gagnes, plus tu montes) et MOYENNE par partie (pour comparer ceux qui jouent beaucoup et ceux qui jouent peu). À savoir : le bonus trophée d'une Ryder (le +5) compte au CUMULÉ mais PAS dans la moyenne — une Ryder y vaut 3 pour un gagnant, comme une victoire normale."],
@@ -924,7 +1008,7 @@ function FaqTab(){
     ]],
     ["📲 Partage & droits",[
       ["💬 Partage WhatsApp","À la fin d'une partie : le PARCOURS joué, le résultat, une fiche par joueur (Stableford brut & net), les coups rendus de chacun et l'évolution au classement — prêt à partager au groupe en un clic. Si la partie ne compte pas (moins de 2 membres), c'est précisé."],
-      ["🔒 L'organisateur","Le menu ⚙️ (réglages) et la suppression de parcours sont réservés à l'organisateur, qui peut aussi modifier la fiche d'un autre joueur. Les autres : ils créent/corrigent des parcours et gèrent LEUR fiche."],
+      ["🔒 L'organisateur","Le menu ⚙️ (réglages), la suppression de parcours et la validation des adhésions sont réservés aux organisateurs, qui peuvent aussi modifier la fiche d'un autre joueur. Les autres : ils créent/corrigent des parcours et gèrent LEUR fiche.\nIl peut y avoir PLUSIEURS organisateurs : dans 👤 Joueurs, le bouton ☆/⭐ Organisateur donne ou retire le droit à un membre. C'est un droit PERMANENT — il n'y a pas de délégation temporaire — donc retire-le quand il n'a plus lieu d'être."],
     ]],
   ];
   const [open,setOpen]=useState(0); // accordéon : index de rubrique ouverte (-1 = toutes fermées)
@@ -995,7 +1079,10 @@ function TabBar({tabs,tab,setTab}){
 }
 
 function Home({setTab,staleCount,refreshStale,openGame}){
-  const {games,user,admin}=useContext(Ctx);
+  const {games,user,admin,members}=useContext(Ctx);
+  // Demandes d'adhésion en attente : il n'y a pas de notification push, l'organisateur
+  // doit donc les voir en arrivant sur l'accueil.
+  const pending=admin?(members||[]).filter(m=>m.memberRequest).length:0;
   // ouvrir WhatsApp si le lien existe ; sinon seul l'organisateur va aux Réglages
   const goWa=()=>waLink?window.open(waLink,"_blank")
     :(admin?setTab("settings"):alert("Le lien du groupe WhatsApp sera ajouté par l'organisateur."));
@@ -1008,6 +1095,14 @@ function Home({setTab,staleCount,refreshStale,openGame}){
   const myLive=ongoing.find(g=>(g.roster||[]).some(p=>String(p.id)===String(user?.id)));
   return (
     <div>
+      {pending>0 && (
+        <div onClick={()=>setTab("players")} style={{...card(T.gold),marginBottom:14,
+          cursor:"pointer",background:`${T.gold}18`}}>
+          <div style={{fontWeight:800,marginBottom:2}}>
+            ⏳ {pending} demande{pending>1?"s":""} d'adhésion en attente</div>
+          <div style={{fontSize:12,color:T.dim}}>
+            Touche ici pour l'examiner dans 👤 Joueurs.</div>
+        </div>)}
       {myLive && !hideJoin && (
         <div style={{...card(T.accent),marginBottom:14,
           background:`linear-gradient(160deg, ${T.accent}22 0%, ${T.panel} 60%)`}}>
@@ -2015,8 +2110,40 @@ function PlayersTab(){
       </div>
     );
   }
+  const pending=members.filter(m=>m.memberRequest).sort((a,b)=>a.memberRequest-b.memberRequest);
+  const accepter=m=>{ if(!confirm(`Accepter ${dispName(m)} comme MEMBRE ? Il comptera au classement dès sa PROCHAINE partie (ses parties passées restent des parties d'invité).`)) return;
+    setMembers(members.map(x=>String(x.id)===String(m.id)
+      ?{...x,member:true,memberRequest:undefined,memberRefused:undefined,memberSince:Date.now()}:x)); };
+  const refuser=m=>{ if(!confirm(`Refuser la demande de ${dispName(m)} ? Il reste invité et pourra redemander.`)) return;
+    setMembers(members.map(x=>String(x.id)===String(m.id)
+      ?{...x,memberRequest:undefined,memberRefused:Date.now()}:x)); };
+  const toggleAdmin=m=>{ const on=m.admin===true;
+    if(!confirm(on?`Retirer les droits d'organisateur à ${dispName(m)} ?`
+      :`Donner les droits d'ORGANISATEUR à ${dispName(m)} ? Il pourra valider les adhésions, modifier les fiches et ouvrir les Réglages.`)) return;
+    setMembers(members.map(x=>String(x.id)===String(m.id)?{...x,admin:!on||undefined}:x)); };
+  const quand=t=>{const j=Math.floor((Date.now()-t)/86400000);
+    return j<=0?"aujourd'hui":j===1?"hier":`il y a ${j} jours`;};
   return (
     <div>
+      {pending.length>0 && (<>
+        <Section>⏳ Demandes d'adhésion ({pending.length})</Section>
+        {pending.map(m=>(
+          <div key={m.id} style={{...card(T.gold),background:`${T.gold}12`}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+              <span style={{fontFamily:"Anton",fontSize:18,color:T.gold}}>{dispName(m)}</span>
+              <span style={{fontSize:11,color:T.dim,marginLeft:"auto"}}>demandé {quand(m.memberRequest)}</span>
+            </div>
+            <div style={{fontSize:12,color:T.dim,lineHeight:1.6,marginBottom:10}}>
+              Prénom <b style={{color:T.text}}>{m.name||"—"}</b> · Surnom <b style={{color:T.text}}>{m.nick||"—"}</b><br/>
+              Index <b style={{color:T.text}}>{m.index}</b> · Mobile <b style={{color:T.text}}>{m.mobile||"—"}</b><br/>
+              Email <b style={{color:T.text}}>{m.email||"non renseigné"}</b>
+            </div>
+            <div style={{display:"flex",gap:8}}>
+              <button onClick={()=>accepter(m)} style={{...addBtn,margin:0,flex:1}}>✅ Accepter</button>
+              <button onClick={()=>refuser(m)} style={{...delBtn,flex:1}}>✖️ Refuser</button>
+            </div>
+          </div>))}
+      </>)}
       <Section>Joueurs membres ({members.length})</Section>
       <div style={{...card(T.gold),fontSize:12,color:T.dim}}>
         👤 Pour chaque joueur : son <b style={{color:T.text}}>prénom</b> et surtout son
@@ -2029,8 +2156,13 @@ function PlayersTab(){
             <span style={{fontFamily:"Anton",fontSize:18,color:T.gold,minWidth:0,
               flex:"0 0 auto",maxWidth:120,overflow:"hidden",textOverflow:"ellipsis",
               whiteSpace:"nowrap"}}>{dispName(m)}</span>
-            <button onClick={()=>del(m)} style={{...delBtn,marginLeft:"auto"}}>🗑 Supprimer</button>
+            <button onClick={()=>toggleAdmin(m)} title="Droits d'organisateur"
+              style={{...delBtn,marginLeft:"auto",borderColor:m.admin?T.gold:T.line,
+                color:m.admin?T.gold:T.dim}}>{m.admin?"⭐ Organisateur":"☆ Organisateur"}</button>
+            <button onClick={()=>del(m)} style={delBtn}>🗑 Supprimer</button>
           </div>
+          {isGuestP(m)&&<div style={{fontSize:11,color:T.dim,marginBottom:4}}>
+            🎟️ invité — ne marque pas de points au classement</div>}
           <div style={{display:"flex",gap:8}}>
             <Field label="Prénom"><input value={m.name}
               onChange={e=>upd(m.id,"name",e.target.value)} placeholder="ex: Jean-Pierre"
@@ -4295,7 +4427,7 @@ function playerScores(sg,ps,course,net){
 }
 
 const SEED_MEMBERS=[
-  {id:"seed-1",name:"Philippe",nick:"",member:true,profileDone:false},
+  {id:"seed-1",name:"Philippe",nick:"",member:true,admin:true,profileDone:false},
   {id:"seed-2",name:"Romain",nick:"",member:true,profileDone:false},
   {id:"seed-3",name:"Richard",nick:"",member:true,profileDone:false},
   {id:"seed-4",name:"Jean-Paul",nick:"",member:true,profileDone:false},
