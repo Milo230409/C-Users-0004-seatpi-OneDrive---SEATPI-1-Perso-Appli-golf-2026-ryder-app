@@ -28,3 +28,8 @@ La clé "publishable" est PUBLIQUE par conception (aucun risque à l'exposer).
 
 ## Mode local
 Sans clés (ou en "invité"), l'app marche en local sur l'appareil, sans partage.
+
+## Branche de production
+`main` est la branche de référence : la Production Branch de Vercel pointe dessus.
+Toute session de dev part de `main` et y refusionne — chaque push sur `main`
+déclenche le déploiement de production.
